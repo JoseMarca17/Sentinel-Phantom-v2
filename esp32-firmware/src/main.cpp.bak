@@ -1,0 +1,41 @@
+#include <Arduino.h>
+#include <ArduinoJson.h>
+
+void setup() {
+    Serial.begin(115200);
+    delay(500);
+    Serial.println(">>> READY");
+}
+
+void loop() {
+    if (Serial.available()) {
+        String line = Serial.readStringUntil('\n');
+        line.trim();
+
+        if (line.length() == 0) return;
+
+        // Intentar parsear JSON
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, line);
+
+        if (err) {
+            // No es JSON valido, hacer eco igual
+            Serial.print("ECO: ");
+            Serial.println(line);
+            return;
+        }
+
+        // Es JSON valido, responder
+        const char* mod = doc["mod"] | "?";
+        const char* cmd = doc["cmd"] | "?";
+
+        JsonDocument resp;
+        resp["status"] = "OK";
+        resp["mod"]    = mod;
+        resp["cmd"]    = cmd;
+        resp["echo"]   = line;
+
+        serializeJson(resp, Serial);
+        Serial.println();
+    }
+}
