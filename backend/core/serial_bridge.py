@@ -1,4 +1,3 @@
-# backend/core/serial_bridge.py
 import serial
 import json
 import threading
@@ -10,10 +9,11 @@ class SerialBridge:
         self.baudrate = baudrate
         self.serial_conn = None
         self.is_running = False
-        self.drivers = {} # Registro dinámico de sub-drivers (IR, RFID, Sub-GHz)
+        self.drivers = {}  # Registro dinámico de sub-drivers (IR, RFID, NRF24)
 
     def register_driver(self, module_name, driver_instance):
         self.drivers[module_name] = driver_instance
+        print(f"[SERIAL] Driver registrado dinámicamente: {module_name}")
 
     def start(self):
         try:
@@ -36,15 +36,29 @@ class SerialBridge:
                         continue
                     
                     payload = json.loads(line)
-                    if payload.get("status") == "OK":
-                        mod = payload.get("mod")
-                        data = payload.get("data")
+                    
+                    # 🛠️ SOLUCIÓN ELÁSTICA: Extraemos el módulo sin importar el formato del protocolo
+                    mod = payload.get("mod") or payload.get("module")
+                    
+                    if not mod:
+                        continue
                         
-                        # DELEGACIÓN MODULAR: Si el módulo está registrado, procesa su lógica independiente
-                        if mod in self.drivers:
-                            self.drivers[mod].handle_incoming_data(data)
+                    # Caso 1: Formato estándar de respuesta a comando
+                    if payload.get("status") == "OK" and "data" in payload:
+                        data = payload.get("data")
+                    # Caso 2: Formato asíncrono de evento o alerta (como tu Protocol.sendEvent)
+                    elif "data" in payload:
+                        data = payload.get("data")
+                    # Caso 3: El JSON es plano y los datos están en la raíz
+                    else:
+                        data = payload
+
+                    # DELEGACIÓN MODULAR BLINDADA
+                    if mod in self.drivers:
+                        self.drivers[mod].handle_incoming_data(data)
+                        
                 except Exception as e:
-                    print(f"[SERIAL] Trampa de lectura corrupta: {e}")
+                    print(f"[SERIAL] Trampa de lectura corrupta o ignorada: {e}")
             time.sleep(0.001)
 
     def send_packet(self, module: str, command: str, params: dict = None):

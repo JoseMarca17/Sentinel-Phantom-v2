@@ -1,5 +1,5 @@
 # backend/models.py
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Float
 from backend.database import Base
 import datetime
 
@@ -16,4 +16,20 @@ class IRCapture(Base):
     protocol = Column(String, nullable=False)
     code = Column(String, nullable=False)
     bits = Column(Integer, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
+class RFIDCapture(Base):
+    __tablename__ = "rfid_captures"
+    id = Column(Integer, primary_key=True, index=True)
+    uid = Column(String, nullable=False)
+    card_type = Column(String, nullable=False)
+    timestamp = Column(DateTime, default=datetime.datetime.now)
+
+class SubGHzCapture(Base):
+    __tablename__ = "subghz_captures"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    alias = Column(String, nullable=False)
+    freq_mhz = Column(Float, nullable=False)
+    pulse_string = Column(String, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
