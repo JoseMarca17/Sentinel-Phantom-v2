@@ -4,12 +4,13 @@
 #include <ArduinoJson.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include "config.h"
+
+// Redefinimos el tamaño del buffer a 512 transiciones de flancos analógicos (RAW Timings)
 #define SG_BUF 512
 
 class SubGHzModule {
 
 public:
-
     bool begin();
     bool isReady() const { return _ready; }
 
@@ -33,10 +34,9 @@ public:
     );
 
 private:
-
     bool _ready = false;
 
-    uint8_t _buf[SG_BUF];
+    uint16_t _buf[SG_BUF];
     int _len = 0;
 
     const float SG_FREQS[5] = {
@@ -48,11 +48,7 @@ private:
     };
 
     void _setFreq(float f);
-
-    void _toHex(
-        char* out,
-        int maxLen
-    );
+    void _releaseAll(); //
 };
 
 extern SubGHzModule SubGHz;

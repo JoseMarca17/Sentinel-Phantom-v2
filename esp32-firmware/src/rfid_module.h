@@ -30,6 +30,8 @@ public:
 
     bool detectReader(JsonDocument& result);
 
+    bool cloneUID(const char* targetUidHex, JsonDocument& result);
+
 private:
 
     bool _ready = false;

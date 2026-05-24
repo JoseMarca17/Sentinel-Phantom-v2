@@ -68,33 +68,36 @@ void NRF24Module::scanSpectrum(JsonDocument& doc) {
 
     RF24& radio = _getAvailableRadio();
     radio.powerUp(); 
-    delay(5); 
+    delay(2); 
 
-    Serial.println("\n--- [DIAGNÓSTICO DE REGISTROS NRF24] ---");
-    radio.printDetails();
-    Serial.println("-----------------------------------------\n");
+    // Forzamos tasa de datos baja para máxima sensibilidad física
+    radio.setDataRate(RF24_250KBPS); 
+    radio.setPALevel(RF24_PA_MAX);   
+    delay(2);
 
     uint8_t result[NRF_CHANNELS] = {0};
 
-    // SOLUCIÓN AL SCANNER: Mayor tiempo de permanencia e integración por canal
     for (int ch = 0; ch < NRF_CHANNELS; ch++) {
         radio.setChannel(ch);
         radio.startListening();
         
-        // Esperamos a que el receptor analógico enganche la frecuencia
+        // Tiempo mínimo para el enganche del sintetizador analógico
         delayMicroseconds(130); 
         
-        // Tomamos 15 muestras rápidas en este canal para captar ráfagas intermitentes
-        for (int sample = 0; sample < 15; sample++) {
+        // ⚡ MUESTREO AGRESIVO: 200 lecturas directas al registro SPI a máxima velocidad
+        for (int sample = 0; sample < 200; sample++) {
             if (radio.testRPD()) { 
-                result[ch]++;
+                result[ch]++; // Acumulamos persistencia
             }
-            delayMicroseconds(50); // Ventana de escucha entre paquetes
         }
         
         radio.stopListening();
-        if (ch % 32 == 0) yield(); // Evita alimentar el Watchdog en barridos pesados
+        if (ch % 16 == 0) yield(); // Evita alimentar el Watchdog del ESP32
     }
+
+    // Retornamos el estado original para el sniffer HID
+    radio.setDataRate(RF24_1MBPS);
+    radio.setPALevel(RF24_PA_LOW);
 
     JsonArray arr = doc["channels"].to<JsonArray>();
     int peakCh = 0;
@@ -217,7 +220,11 @@ void NRF24Module::startJammer(JamMode mode, uint8_t channel) {
     RF24& radio = _nrf2Ready ? _nrf2 : _nrf1;
     radio.powerUp();
     delay(5);
-    radio.stopListening(); // Modo TX puro
+    radio.stopListening(); // Modo TX puro de alta ganancia
+    
+    // ⚡ AJUSTES DE POTENCIA MÁXIMA DE HARDWARE
+    radio.setPALevel(RF24_PA_MAX);   // Forzamos 0dBm de salida (Máximo del chip)
+    radio.setDataRate(RF24_250KBPS); // Concentra la densidad de potencia en el canal
 }
 
 void NRF24Module::stopJammer() {
@@ -231,21 +238,24 @@ void NRF24Module::jamTick() {
 
     if (_jamMode == JAM_SINGLE) {
         radio.setChannel(_jamCh);
-        // SOLUCIÓN AL JAMMER: Usamos escritura no bloqueante rápida
+        // Transmisión directa sin pausas al buffer de salida
         radio.startFastWrite(_junk, 32, true); 
         _packetsSent++;
     } 
     else if (_jamMode == JAM_CARPET) {
-        for (uint8_t ch = 1; ch < 100; ch++) {
-            radio.setChannel(ch);
-            radio.startFastWrite(_junk, 32, true);
-            _packetsSent++;
+        // ⚡ CARPET OPTIMIZADO: Solo barremos los canales canónicos de Bluetooth/WiFi
+        // en lugar de dispersar la energía por frecuencias vacías
+        for (uint8_t i = 0; i < 3; i++) {
+            uint8_t targetCh = BLE_CHS[i]; // Usa tus constantes fijas {2, 26, 80}
+            radio.setChannel(targetCh);
             
-            // Cada 25 canales soltamos el control un instante para calmar al procesador
-            if (ch % 25 == 0) {
-                yield(); 
+            // Bombardeo rápido en ráfaga antes de saltar de canal
+            for(int r = 0; r < 5; r++) {
+                radio.startFastWrite(_junk, 32, true);
+                _packetsSent++;
             }
         }
+        yield(); // Alimentamos el Watchdog del ESP32 una vez por ciclo completo
     }
 }
 

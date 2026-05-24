@@ -1,128 +1,178 @@
 #include "subghz_module.h"
+#include "serial_protocol.h"
 
 SubGHzModule SubGHz;
 
-bool SubGHzModule::begin() {
-    ELECHOUSE_cc1101.setSpiPin(PIN_SCK, PIN_MISO, PIN_MOSI, PIN_CC1101_CS);
-    ELECHOUSE_cc1101.Init();
-    if (!ELECHOUSE_cc1101.getCC1101()) { _ready = false; return false; }
-    ELECHOUSE_cc1101.setMHZ(433.92);
-    ELECHOUSE_cc1101.SetRx();
-    _ready = true;
-    return true;
-}
+// Variables volátiles para el manejo de interrupciones en tiempo real
+volatile uint32_t lastChangeTime = 0;
+volatile uint16_t pulseBuffer[SG_BUF];
+volatile uint16_t pulseIndex = 0;
+volatile bool captureDone = false;
 
-bool SubGHzModule::capture(float freq, JsonDocument& result) {
-    _setFreq(freq);
-    ELECHOUSE_cc1101.SetRx();
+// Rutina de Interrupción de Hardware (ISR) para capturar los flancos analógicos
+void IRAM_ATTR subghz_pulse_isr() {
+    uint32_t now = micros();
+    uint32_t duration = now - lastChangeTime;
+    lastChangeTime = now;
 
-    uint32_t t = millis();
-    _len = 0;
-
-    while (millis() - t < 5000) {
-        if (digitalRead(PIN_CC1101_GDO0) == HIGH) {
-            while (digitalRead(PIN_CC1101_GDO0) == HIGH && _len < SG_BUF) {
-                _buf[_len++] = 1;
-                delayMicroseconds(100);
-            }
-            break;
+    // Descartamos el primer pulso residual de estabilización
+    if (duration > 50 && !captureDone) {
+        if (pulseIndex < SG_BUF) {
+            pulseBuffer[pulseIndex++] = (duration > 65535) ? 65535 : duration;
+        } else {
+            captureDone = true; // Buffer lleno, detenemos la escucha
         }
     }
+}
 
-    if (_len == 0) {
-        result["success"] = false;
-        result["error"]   = "No signal";
+bool SubGHzModule::begin() {
+    // 1. Configuramos el pin GDO0 como entrada antes de que se use en interrupciones
+    pinMode(PIN_CC1101_GDO0, INPUT);
+    
+    // 2. Forzamos el Pin CS a nivel alto para limpiar el ruido del bus SPI compartido con las radios NRF24
+    pinMode(PIN_CC1101_CS, OUTPUT);
+    digitalWrite(PIN_CC1101_CS, HIGH);
+    delay(10);
+
+    // 3. Inicialización formal pasándole los pines de tu config.h a la librería SmartRC
+    // (Esto le dice a la librería qué pin CS y qué pin GDO0 usar de tu mapa real)
+    ELECHOUSE_cc1101.setSpiPin(PIN_SCK, PIN_MISO, PIN_MOSI, PIN_CC1101_CS);
+    ELECHOUSE_cc1101.setGDO0(PIN_CC1101_GDO0);
+    
+    // Inicializamos el backend del chip
+    ELECHOUSE_cc1101.Init();
+    
+    // 4. Verificación física del integrado en el bus SPI
+    if (!ELECHOUSE_cc1101.getCC1101()) {
+        Serial.println("[CC1101] Comunicación SPI fallida. Verificando registros...");
+        _ready = false;
         return false;
     }
 
-    char hex[SG_BUF * 2 + 1];
-    _toHex(hex, sizeof(hex));
-    result["success"]  = true;
-    result["freq_mhz"] = freq;
-    result["length"]   = _len;
-    result["raw_hex"]  = hex;
-    return true;
+    // Configuración del modulador OOK estándar para mandos de portones
+    ELECHOUSE_cc1101.setModulation(2); 
+    _setFreq(433.92);                  // Sintonía base
+    ELECHOUSE_cc1101.SetRx();          // Escucha defensiva activa
+    
+    _ready = true;
+    return _ready;
 }
 
-bool SubGHzModule::replay(float freq, const char* hex,
-                           JsonDocument& result) {
+void SubGHzModule::_setFreq(float f) {
+    ELECHOUSE_cc1101.setMHZ(f);
+}
+
+bool SubGHzModule::capture(float freq, JsonDocument& result) {
+    if (!_ready) return false;
+    _releaseAll();
+
     _setFreq(freq);
-    ELECHOUSE_cc1101.SetTx();
-    delay(50);
+    pulseIndex = 0;
+    captureDone = false;
+    lastChangeTime = micros();
 
-    int     hl = strlen(hex);
-    int     nb = hl / 2;
-    uint8_t buf[SG_BUF];
+    ELECHOUSE_cc1101.SetRx();
+    // Enlazamos la interrupción al pin de datos del CC1101 (GDO0 / PIN_CC1101_GDO0)
+    attachInterrupt(digitalPinToInterrupt(PIN_CC1101_GDO0), subghz_pulse_isr, CHANGE);
 
-    for (int i = 0; i < nb && i < SG_BUF; i++) {
-        char b[3] = {hex[i*2], hex[i*2+1], '\0'};
-        buf[i] = (uint8_t)strtol(b, nullptr, 16);
+    uint32_t startTime = millis();
+    // Ventana de escucha activa de 3000ms o hasta llenar el buffer de transiciones
+    while (millis() - startTime < 3000 && !captureDone) {
+        yield(); 
     }
 
-    ELECHOUSE_cc1101.SendData(buf, nb);
-    delay(100);
-    ELECHOUSE_cc1101.SetRx();
+    detachInterrupt(digitalPinToInterrupt(PIN_CC1101_GDO0));
+    ELECHOUSE_cc1101.setSidle();
 
-    result["success"]    = true;
-    result["freq_mhz"]   = freq;
-    result["bytes_sent"] = nb;
+    if (pulseIndex > 10) { // Si interceptamos un tren de pulsos válido
+        JsonArray timings = result["timings"].to<JsonArray>();
+        for (int i = 0; i < pulseIndex; i++) {
+            timings.add(pulseBuffer[i]);
+        }
+        result["count"] = pulseIndex;
+        result["freq_mhz"] = freq;
+        result["captured"] = true;
+        return true;
+    }
+
+    result["captured"] = false;
+    return false;
+}
+
+bool SubGHzModule::replay(float freq, const char* hex, JsonDocument& result) {
+    // Nota: Para simplificar el transporte UART y no lidiar con arrays pesados en el JSON de subida,
+    // procesamos un tren de pulsos simétrico mapeado por tiempos fijos desde el Hex o parámetros.
+    if (!_ready) return false;
+    _releaseAll();
+
+    _setFreq(freq);
+    ELECHOUSE_cc1101.SetTx(); // Conmutación física a modo transmisión
+
+    // Recomposición y modulación OOK analógica en el pin emisor
+    pinMode(PIN_CC1101_GDO0, OUTPUT);
+
+    // Iteramos el Payload simulando las transiciones del control original
+    for (int r = 0; hex[r] != '\0'; r++) {
+        char c = hex[r];
+        // Convertimos el mapa de caracteres a pulsos de alta fidelidad (Ejemplo: '1' = alto, '0' = bajo)
+        if (c == '1') {
+            digitalWrite(PIN_CC1101_GDO0, HIGH);
+            delayMicroseconds(350); // Pulso estándar de reloj T
+            digitalWrite(PIN_CC1101_GDO0, LOW);
+            delayMicroseconds(1050);
+        } else {
+            digitalWrite(PIN_CC1101_GDO0, HIGH);
+            delayMicroseconds(1050);
+            digitalWrite(PIN_CC1101_GDO0, LOW);
+            delayMicroseconds(350);
+        }
+    }
+
+    pinMode(PIN_CC1101_GDO0, INPUT); // Regresamos el pin a alta impedancia
+    ELECHOUSE_cc1101.SetRx();        // Modo seguro defensivo
+    result["transmitted"] = true;
     return true;
 }
 
 bool SubGHzModule::scanFreqs(JsonDocument& result) {
-    JsonArray arr = result["frequencies"].to<JsonArray>();
-
+    if (!_ready) return false;
+    JsonArray arr = result["active_freqs"].to<JsonArray>();
+    
     for (int i = 0; i < 5; i++) {
         float f = SG_FREQS[i];
         _setFreq(f);
         ELECHOUSE_cc1101.SetRx();
-        delay(200);
-
-        bool act = false;
-        uint32_t t = millis();
-        while (millis() - t < 300)
-            if (digitalRead(PIN_CC1101_GDO0) == HIGH) { act = true; break; }
-
-        JsonObject o   = arr.add<JsonObject>();
-        o["freq_mhz"]  = f;
-        o["activity"]  = act;
+        delay(20);
+        
+        // Verificamos el indicador de fuerza de señal recibida (RSSI) del CC1101
+        int rssi = ELECHOUSE_cc1101.getRssi();
+        if (rssi > -75) { // Si hay actividad sospechosa en esa frecuencia
+            arr.add(f);
+        }
     }
-
-    result["scanned"] = 5;
     return true;
 }
 
 bool SubGHzModule::jam(float freq, int ms, JsonDocument& result) {
+    if (!_ready) return false;
+    _releaseAll();
     _setFreq(freq);
     ELECHOUSE_cc1101.SetTx();
-
-    uint8_t noise[61];
-    for (int i = 0; i < 61; i++) noise[i] = random(0, 255);
-
-    uint32_t t = millis();
-    int pkts = 0;
-
-    while (millis() - t < (uint32_t)ms) {
-        ELECHOUSE_cc1101.SendData(noise, 61);
-        pkts++;
-        delay(5);
+    
+    pinMode(PIN_CC1101_GDO0, OUTPUT);
+    uint32_t start = millis();
+    while (millis() - start < (uint32_t)ms) {
+        // Generamos ruido binario asimétrico directo en el modulador
+        digitalWrite(PIN_CC1101_GDO0, HIGH); delayMicroseconds(100);
+        digitalWrite(PIN_CC1101_GDO0, LOW);  delayMicroseconds(100);
     }
-
+    pinMode(PIN_CC1101_GDO0, INPUT);
     ELECHOUSE_cc1101.SetRx();
-    result["success"]      = true;
-    result["freq_mhz"]     = freq;
-    result["duration_ms"]  = ms;
-    result["packets_sent"] = pkts;
+    result["jammed"] = true;
     return true;
 }
 
-void SubGHzModule::_setFreq(float f) { ELECHOUSE_cc1101.setMHZ(f); }
-
-void SubGHzModule::_toHex(char* out, int maxLen) {
-    out[0] = '\0';
-    int w = 0;
-    for (int i = 0; i < _len && w + 2 < maxLen; i++) {
-        sprintf(out + w, "%02X", _buf[i]);
-        w += 2;
-    }
+void SubGHzModule::_releaseAll() {
+    detachInterrupt(digitalPinToInterrupt(PIN_CC1101_GDO0));
+    ELECHOUSE_cc1101.setSidle();
 }

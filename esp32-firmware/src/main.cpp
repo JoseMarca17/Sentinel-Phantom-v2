@@ -126,16 +126,35 @@ void handleSUBGHZ(Command &cmd) {
     if (cmd.cmd == "SCAN") {
         SubGHz.scanFreqs(d);
         Protocol.sendData("SUBGHZ", d);
-    } else if (cmd.cmd == "CAPTURE") {
+    } 
+    else if (cmd.cmd == "CAPTURE") {
         float freq = cmd.params["freq_mhz"] | 433.92f;
+        // La función rellenará el array de "timings" medidos por la ISR
         SubGHz.capture(freq, d);
+        Protocol.sendData("SUBGHZ", d); 
+    } 
+    else if (cmd.cmd == "REPLAY") {
+        float freq = cmd.params["freq_mhz"] | 433.92f;
+        const char* hexPayload = cmd.params["hex"] | "";
+        
+        if (strlen(hexPayload) == 0) {
+            d["success"] = false;
+            d["error"] = "missing hex data";
+            Protocol.sendData("SUBGHZ", d);
+            return;
+        }
+        
+        // El ESP32 modula físicamente la antena clonando la señal
+        SubGHz.replay(freq, hexPayload, d);
         Protocol.sendData("SUBGHZ", d);
-    } else if (cmd.cmd == "JAM") {
+    } 
+    else if (cmd.cmd == "JAM") {
         float freq = cmd.params["freq_mhz"] | 433.92f;
         int duration = cmd.params["duration_ms"] | 1000;
         SubGHz.jam(freq, duration, d);
         Protocol.sendData("SUBGHZ", d);
-    } else {
+    } 
+    else {
         Protocol.sendError("SUBGHZ", "unknown command");
     }
 }
@@ -143,11 +162,26 @@ void handleSUBGHZ(Command &cmd) {
 void handleRFID(Command &cmd) {
     if (!RFID_SYS.ready) { Protocol.sendError("RFID", "module offline"); return; }
     JsonDocument d;
-    if (cmd.cmd == "READ") {
+    
+    if (cmd.cmd == "READ" || cmd.cmd == "READ_CARD") {
         RFIDMod.readCard(d);
         Protocol.sendData("RFID", d);
     } else if (cmd.cmd == "DUMP") {
-        RFIDMod.dumpMifare(d);
+        // RFIDMod.dumpMifare(d);
+        bool dumpOk = RFIDMod.dumpMifare(d);
+        d["success"] = dumpOk;
+        Protocol.sendData("RFID", d);
+    } else if (cmd.cmd == "CLONE_UID") {
+        const char* targetUid = cmd.params["uid"] | "";
+        if (strlen(targetUid) == 0) {
+            d["success"] = false;
+            d["error"] = "missing uid param";
+            Protocol.sendData("RFID", d);
+            return;
+        }
+        
+        // Llamada física al PN532
+        RFIDMod.cloneUID(targetUid, d);
         Protocol.sendData("RFID", d);
     } else {
         Protocol.sendError("RFID", "unknown command");
