@@ -1,15 +1,18 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import SentinelShell from '../components/screen/SentinelShell';
 import PhantomBotDynamic from '../components/screen/PhantomBotDynamic';
 import SubScreenIr from '../components/screen/SubScreenIr';
+import SubScreenRfid from '../components/screen/SubScreenRfid';
+import SubScreenNrf from '../components/screen/SubScreenNrf';
+import SubScreenSubghz from '../components/screen/SubScreenSubghz';
 
 const MODS = [
   { id: 'ir', name: 'IR', full: 'INFRARROJO IR', sub: 'TV-B-GONE / RAW INJECT', status: 'ONLINE' },
-  { id: 'rfid', name: 'RFID', full: 'RFID PN532', sub: '13.56MHZ MIFARE CLONER', status: 'SCANNING' },
+  { id: 'rfid', name: 'RFID', full: 'RFID PN532', sub: '13.56MHZ MIFARE CLONER', status: 'ONLINE' },
   { id: 'subghz', name: 'SUB-GHZ', full: 'CC1101 SUB-GHZ', sub: '433MHZ REPLAY NODE', status: 'OFFLINE' },
   { id: 'wifi', name: 'WI-FI', full: 'RT5370 WI-FI', sub: 'MONITOR / DEAUTH MODE', status: 'OFFLINE' },
   { id: 'bt', name: 'BT BLE', full: 'BLUETOOTH BLE', sub: 'BEACON SNIFFER', status: 'ONLINE' },
-  { id: 'nfc', name: 'NFC', full: 'NFC ISO14443', sub: 'NDEF READ / EMULATE', status: 'SCANNING' },
+  { id: 'nrf', name: 'NRF24', full: 'NRF24 TRANSCEIVER', sub: '2.4GHZ SPECTRUM / HID', status: 'ONLINE' }, // 🛠️ SUSTITUIDO NFC POR NRF24
 ];
 
 const ModuleIcon = ({ id, active }) => {
@@ -41,9 +44,12 @@ const ModuleIcon = ({ id, active }) => {
         <polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"/>
       </svg>
     ),
-    nfc: (
-      <svg viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2.2" strokeLinecap="round">
-        <rect x="5" y="4" width="14" height="16" rx="2"/><line x1="9" y1="9" x2="9" y2="15"/><path d="M13 9a3 3 0 0 1 0 6"/>
+    nrf: (
+      /* 🛠️ NUEVO ICONO VECTORIAL TÁCTICO PARA EL TRANSCEPTOR NRF24L01+ */
+      <svg viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="3" width="14" height="18" rx="2" />
+        <path d="M12 13v5M9 15h6M12 6a3 3 0 0 1 3 3M12 3a6 6 0 0 1 6 6" />
+        <circle cx="12" cy="9" r="1" fill={stroke} />
       </svg>
     ),
   };
@@ -62,15 +68,13 @@ export default function SentinelScreenMain() {
       return;
     }
 
-    // Si estamos dentro de un módulo y presionamos BACK
     if (action === 'BACK' && inModule) {
       setInModule(false);
-      setActionPayload(null); // Limpieza inmediata al salir al carrusel
+      setActionPayload(null); 
       return;
     }
 
     if (inModule) {
-      // Flujo asíncrono controlado para enviar la acción al hijo y destruirla de inmediato
       setActionPayload({ type: action, timestamp: Date.now() });
       setTimeout(() => {
         setActionPayload(null);
@@ -78,7 +82,6 @@ export default function SentinelScreenMain() {
       return; 
     }
 
-    // Lógica del Carrusel de Módulos (Fuera de pantallas de firmware)
     switch(action) {
       case 'UP': case 'LEFT':
         setIdx(p => (p - 1 + MODS.length) % MODS.length);
@@ -87,11 +90,13 @@ export default function SentinelScreenMain() {
         setIdx(p => (p + 1) % MODS.length);
         break;
       case 'OK':
-        if (MODS[idx].id === 'ir') {
-          setActionPayload(null); // Bloqueo preventivo de la señal antes de cambiar de vista
+        // 🛠️ ACOPLAMIENTO DE LA BANDERA DE INYECCIÓN UNIFICADA CON EL ID 'nrf'
+        if (MODS[idx].id === 'ir' || MODS[idx].id === 'rfid' || MODS[idx].id === 'nrf' || MODS[idx].id === 'subghz') {
+          setActionPayload(null); 
           setInModule(true);
         }
         break;
+      
       default: break;
     }
   }, [booted, inModule, idx]);
@@ -104,17 +109,20 @@ export default function SentinelScreenMain() {
   return (
     <SentinelShell onAction={handleAction} booted={booted} statusText={inModule ? "RUNNING_MOD" : "MAIN_MENU"}>
       {!booted ? (
-        /* SCREEN DE BIENVENIDA CON EL PHANTOM BOT */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#201000' }}>
           <PhantomBotDynamic />
           <h2 style={{ letterSpacing: '6px', fontSize: '28px', fontWeight: '900', margin: '15px 0 5px 0' }}>PHANTOM OS</h2>
           <p style={{ fontSize: '11px', fontWeight: 'bold', opacity: 0.6 }}>[ PRESS EXE TO INITIALIZE ]</p>
         </div>
       ) : inModule && activeMod.id === 'ir' ? (
-        /* INTERFAZ INTERNA DEL MÓDULO SELECCIONADO */
         <SubScreenIr lastAction={actionPayload} />
+      ) : inModule && activeMod.id === 'rfid' ? (
+        <SubScreenRfid lastAction={actionPayload} />
+      ) : inModule && activeMod.id === 'nrf' ? (
+        <SubScreenNrf lastAction={actionPayload} />
+      ) : inModule && activeMod.id === 'subghz'?(
+        <SubScreenSubghz lastAction={actionPayload} />
       ) : (
-        /* CARRUSEL DE HARDWARE */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '25px', color: '#201000', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '3px solid #201000', paddingBottom: '8px', fontWeight: '900' }}>
             <span>SELECT_HARDWARE_BUS</span>
