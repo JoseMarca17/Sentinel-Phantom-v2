@@ -5,6 +5,7 @@ import SubScreenIr from '../components/screen/SubScreenIr';
 import SubScreenRfid from '../components/screen/SubScreenRfid';
 import SubScreenNrf from '../components/screen/SubScreenNrf';
 import SubScreenSubghz from '../components/screen/SubScreenSubghz';
+import SubScreenWifi from '../components/screen/SubScreenWifi';
 
 const MODS = [
   { id: 'ir', name: 'IR', full: 'INFRARROJO IR', sub: 'TV-B-GONE / RAW INJECT', status: 'ONLINE' },
@@ -91,7 +92,8 @@ export default function SentinelScreenMain() {
         break;
       case 'OK':
         // 🛠️ ACOPLAMIENTO DE LA BANDERA DE INYECCIÓN UNIFICADA CON EL ID 'nrf'
-        if (MODS[idx].id === 'ir' || MODS[idx].id === 'rfid' || MODS[idx].id === 'nrf' || MODS[idx].id === 'subghz') {
+        if (MODS[idx].id === 'ir' || MODS[idx].id === 'rfid' || MODS[idx].id === 'nrf' 
+          || MODS[idx].id === 'subghz' || MODS[idx].id === 'wifi') {
           setActionPayload(null); 
           setInModule(true);
         }
@@ -122,6 +124,8 @@ export default function SentinelScreenMain() {
         <SubScreenNrf lastAction={actionPayload} />
       ) : inModule && activeMod.id === 'subghz'?(
         <SubScreenSubghz lastAction={actionPayload} />
+      ) : inModule && activeMod.id === 'wifi' ?(
+        <SubScreenWifi lastAction={actionPayload} />
       ) : (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '25px', color: '#201000', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '3px solid #201000', paddingBottom: '8px', fontWeight: '900' }}>
