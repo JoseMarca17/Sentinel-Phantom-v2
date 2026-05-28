@@ -1,4 +1,3 @@
-# backend/drivers/wifi/wifi_sniffer.py
 import subprocess
 import threading
 import time
@@ -17,6 +16,11 @@ class WiFiSniffer:
         self.stations = {}       
         self._sniff_thread = None
         self.is_sniffing = False
+        
+        # 🚀 Temporizadores independientes para Throttling táctico (Evita asfixiar a React)
+        self.last_beacon_broadcast = 0
+        self.last_probe_broadcast = 0
+        self.last_station_broadcast = 0
 
     def _packet_handler(self, pkt):
         if not pkt.haslayer(Dot11):
@@ -97,7 +101,11 @@ class WiFiSniffer:
             finally:
                 db.close()
 
-            socket_manager.broadcast_sync("WIFI_SPECTRUM", list(self.networks.values()))
+            # 🟢 THROTTLING CONTROLADO: 400ms para mantener barras fluidas en React sin congelar el bus
+            ahora = time.time()
+            if ahora - self.last_beacon_broadcast > 0.4:
+                socket_manager.broadcast_sync("WIFI_SPECTRUM", list(self.networks.values()))
+                self.last_beacon_broadcast = ahora
 
         # 📶 [02. CLIENT PROBING SNIFFER]
         elif pkt.haslayer(Dot11ProbeReq):
@@ -140,7 +148,11 @@ class WiFiSniffer:
             finally:
                 db.close()
 
-            socket_manager.broadcast_sync("WIFI_PROBES", self.probes)
+            # 🟢 THROTTLING DE PROBES: Despacha ráfaga cada 500ms
+            ahora = time.time()
+            if ahora - self.last_probe_broadcast > 0.5:
+                socket_manager.broadcast_sync("WIFI_PROBES", self.probes)
+                self.last_probe_broadcast = ahora
 
         # 🔍 [04. HIDDEN SSID REVEALER & 05. WIRELESS STATION MAPPER]
         elif pkt.haslayer(Dot11AssoReq):
@@ -165,7 +177,12 @@ class WiFiSniffer:
             finally:
                 db.close()
 
-            socket_manager.broadcast_sync("WIFI_STATIONS", self.stations)
+            # 🟢 THROTTLING DE ASOCIACIONES Y RELACIONES AP-CLIENTE
+            ahora = time.time()
+            if ahora - self.last_station_broadcast > 0.5:
+                # Se envía el diccionario relacional directo al bus mapeador
+                socket_manager.broadcast_sync("WIFI_STATIONS", self.stations)
+                self.last_station_broadcast = ahora
             
             if pkt.haslayer(Dot11Elt) and pkt[Dot11Elt].ID == 0:
                 try:
@@ -200,7 +217,6 @@ class WiFiSniffer:
         try:
             from scapy.arch.linux import L2ListenSocket
             
-            # Instanciamos explícitamente el socket nativo del kernel de Linux
             s = L2ListenSocket(iface=target_iface, type=0x0003)  # ETH_P_ALL
             
             sniff(
@@ -213,7 +229,6 @@ class WiFiSniffer:
             print(f"[WIFI SNIFFER CRITICAL] Error de descriptor: {e}")
             self.is_sniffing = False
         finally:
-            # Recolección de basura agresiva: Forzamos la liberación del descriptor de red
             if s:
                 try:
                     s.close()
@@ -232,7 +247,6 @@ class WiFiSniffer:
         print("[WIFI SNIFFER] Motor analítico de Capa 2 y persistencia en línea.")
 
     def stop(self):
-        """Detiene el sniffer de forma síncrona bloqueando el hilo hasta liberar el socket."""
         if not self.is_sniffing:
             return
 
