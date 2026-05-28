@@ -8,7 +8,7 @@ export default function SubScreenWifi({ lastAction }) {
   const [activeBlock, setActiveBlock] = useState(0); 
   const [functionIdx, setFunctionIdx] = useState(0);
 
-  // Estados de telemetría de red compartidos
+  // Buffer de telemetría de red centralizado
   const [accessPoints, setAccessPoints] = useState([]);
   const [clients, setClients] = useState([]);
   const [probes, setProbes] = useState([]);
@@ -41,7 +41,7 @@ export default function SubScreenWifi({ lastAction }) {
       desc: "Capa 3 - Manipulación de Vector de Red", 
       icon: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="12" cy="12" r="3" opacity="0.15"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6" /></svg>), 
       functions: [
-        { id: "lan_scan", label: "06. LAN Discovery (Active ARP)", desc: "Inyecta tramas ARP Request en la red local vía wlo1 para mapear IPs y MACs conectadas." },
+        { id: "lan_scan", label: "06. LAN Discovery (Active ARP)", desc: "Inyecta tramas ARP e interroga mediante firmas TCP/IP para mapear dispositivos locales." },
         { id: "arp_spoof", label: "07. ARP Spoofing Bridge", desc: "Envenena las tablas de enrutamiento del router para desviar la navegación de una víctima." },
         { id: "dns_spoof", label: "08. DNS Spoofer Local", desc: "Falsifica respuestas de dominio DNS para redirigir peticiones locales a tu C2." },
         { id: "deauth_burst", label: "09. Pure Deauth Tactical Burst", desc: "Envía una ráfaga Deauth masiva a un canal para desautenticar clientes inalámbricos." },
@@ -65,24 +65,38 @@ export default function SubScreenWifi({ lastAction }) {
 
   const sendC2Action = async (cmd, params = {}) => {
     try {
-      await fetch("http://127.0.0.1:8000/api/wifi/action", {
+      const response = await fetch("http://127.0.0.1:8000/api/wifi/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...params })
       });
-    } catch (err) { setMonitorLog("C2 ERR: Bus REST denegado"); }
+      return await response.json();
+    } catch (err) { 
+      setMonitorLog("C2 ERR: Bus REST denegado"); 
+    }
   };
 
+  // 📡 FILTRO PARANOICO DEL DESPACHADOR DE WEBSOCKETS
   useEffect(() => {
     const ws = new WebSocket("ws://127.0.0.1:8000/ws/control");
+    
     ws.onmessage = (event) => {
       try {
-        const packet = JSON.parse(event.data);
-        if (Array.isArray(packet)) setAccessPoints(packet);
-        else if (packet.module === "WIFI_LAN_HOSTS") setClients(packet.data);
-        else if (packet.module === "WIFI_SPECTRUM") setAccessPoints(packet.data);
-        else if (packet.module === "WIFI_PROBES") setProbes(packet.data);
-      } catch (e) {}
+        const raw = JSON.parse(event.data);
+        const module = raw.module;
+        const payload = raw.data || [];
+
+        // Aseguramos que el buffer mapee exactamente lo que las sub-ventanas leen
+        if (module === "WIFI_SPECTRUM") {
+            setAccessPoints(Array.isArray(payload) ? payload : []);
+        } else if (module === "WIFI_LAN_HOSTS") {
+            setClients(Array.isArray(payload) ? payload : []);
+        } else if (module === "WIFI_PROBES") {
+            setProbes(Array.isArray(payload) ? payload : []);
+        }
+      } catch (e) {
+        console.error("Error parseo WS:", e);
+      }
     };
     return () => ws.close();
   }, []);
@@ -96,10 +110,9 @@ export default function SubScreenWifi({ lastAction }) {
 
     if (modal.visible) { setModal(p => ({ ...p, visible: false })); return; }
 
-    // 🟢 CONTROL DE INTERRUPCIÓN GLOBAL (TIER 3)
     if (tier === 'action') {
       if (type === 'BACK' || type === 'LEFT') {
-        console.log("[C2 HARDWARE] Deteniendo transmisiones y cerrando descriptores...");
+        console.log("[C2 HARDWARE] Desmantelando transmisión promiscuas...");
         sendC2Action("STOP_MONITOR"); 
         setIsInjecting(false);
         setStatusLog("ANTENNA: PASSIVE_STANDBY");
@@ -123,19 +136,22 @@ export default function SubScreenWifi({ lastAction }) {
         case 'DOWN': setFunctionIdx(p => (p + 1) % max); break;
         
         case 'OK': 
-          // 🟢 ORQUESTACIÓN DE ENCENDIDO TÁCTICO CONTROLADO
           const targetFuncId = modulesConfig[activeBlock].functions[functionIdx].id;
           
           if (activeBlock === 0) {
-            setMonitorLog("KERNEL: INTERCEPCIÓN RADAR ACTIVA VÍA wlp8s0f3u1");
+            setMonitorLog("KERNEL: INTERCEPCIÓN RADAR ACTIVA EN INTERFAZ EXTERNA");
             sendC2Action("INITIALIZE");
           } else if (targetFuncId === "lan_scan") {
-            setMonitorLog("NET: BARRIDO ARP DISPARADO EN INTERFAZ wlo1");
-            sendC2Action("LAN_SCAN", { range: "192.168.1.0/24" });
-          } else if (targetFuncId === "mac_random") {
-            setModal({ visible: true, title: "MAC MUTADA", msg: "REGISTROS OUI ACTUALIZADOS EN EL KERNEL", extra: "wlp8s0f3u1 alterada con éxito." });
-            sendC2Action("INITIALIZE");
-            return; 
+            setMonitorLog("NET: AGUARDANDO PARAMETROS EN FORMULARIO L3...");
+          } else if (activeBlock === 2) {
+            if (targetFuncId === "mac_random") {
+              setModal({ visible: true, title: "MAC MUTADA", msg: "REGISTROS OUI ACTUALIZADOS EN EL KERNEL", extra: "Adaptador anonimizado con éxito." });
+              sendC2Action("RANDOMIZE_MAC_TACTICAL");
+              return; 
+            } else {
+              setMonitorLog(`GUARD: CONFIGURANDO VIGILANCIA EN REGLA ${targetFuncId.toUpperCase()}`);
+              sendC2Action("START_DEFENSE_IDS", { modId: targetFuncId });
+            }
           }
           
           setTier('action'); 
@@ -153,7 +169,7 @@ export default function SubScreenWifi({ lastAction }) {
   const visibleCards = [-1, 0, 1].map(off => ({ ...modulesConfig[(activeBlock + off + 3) % 3], off }));
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', color: '#201000', padding: '15px 20px', fontFamily: 'monospace', position: 'relative', boxSizing: 'border-box', background: 'transparent' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', color: '#201000', padding: '15px 20px', fontFamily: 'monospace', boxSizing: 'border-box', background: 'transparent' }}>
       
       {/* Cabecera Sepia */}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', borderBottom: '3px solid #201000', paddingBottom: '6px', marginBottom: '15px', fontWeight: '900' }}>
@@ -210,10 +226,10 @@ export default function SubScreenWifi({ lastAction }) {
           </div>
         )}
 
-        {/* TIER 3: Renderizado Modular de Sub-Páginas */}
+        {/* TIER 3: RENDERIZADO MODULAR INYECTADO SIN PERDIDAS */}
         {tier === 'action' && activeBlock === 0 && <WifiSpectrum functionIdx={functionIdx} lastAction={lastAction} accessPoints={accessPoints} probes={probes} />}
         {tier === 'action' && activeBlock === 1 && <WifiMitm functionIdx={functionIdx} lastAction={lastAction} sendC2Action={sendC2Action} accessPoints={accessPoints} clients={clients} isInjecting={isInjecting} setIsInjecting={setIsInjecting} setStatusLog={setStatusLog} />}
-        {tier === 'action' && activeBlock === 2 && <WifiDefense functionIdx={functionIdx} lastAction={lastAction} />}
+        {tier === 'action' && activeBlock === 2 && <WifiDefense functionIdx={functionIdx} lastAction={lastAction} sendC2Action={sendC2Action} />}
 
       </div>
 
