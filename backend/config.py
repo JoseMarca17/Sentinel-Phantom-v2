@@ -9,8 +9,8 @@ def es_raspberry_pi() -> bool:
         return False
 
 if es_raspberry_pi():
-    INTERFACE_CONTROL = "wlan0"  
+    INTERFACE_MONITOR = "wlan0"  
     INTERFACE_ATTACK  = "wlan1"  
 else:
-    INTERFACE_CONTROL = "wlo1"          
+    INTERFACE_MONITOR = "wlo1"          
     INTERFACE_ATTACK  = "wlp8s0f3u1"    
