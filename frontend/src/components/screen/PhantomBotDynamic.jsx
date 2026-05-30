@@ -3,32 +3,43 @@ import React from 'react';
 
 export default function PhantomBotDynamic() {
   return (
-    <svg width="110" height="110" viewBox="0 0 100 100" fill="none" style={{ animation: 'sp-float 3s ease-in-out infinite', filter: 'drop-shadow(0 0 12px rgba(255,149,0,0.45))' }}>
-      {/* Antenas de escaneo superiores */}
-      <path d="M30 20 L20 8 M70 20 L80 8" stroke="#ff9500" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="20" cy="8" r="3" fill="#ff9500" />
-      <circle cx="80" cy="8" r="3" fill="#ff9500" />
+    <svg 
+      width="100%" 
+      height="100%" 
+      viewBox="0 0 100 100" 
+      fill="none" 
+      className="drop-shadow-[0_0_2px_rgba(32,16,0,0.3)]"
+      style={{ animation: 'sp-float 2.5s ease-in-out infinite' }}
+    >
+      {/* ANTENAS MECANIZADAS GRUESAS */}
+      <path d="M30 15 L10 2 M70 15 L90 2" stroke="#201000" strokeWidth="3" strokeLinecap="square" />
+      <polygon points="8,2 16,0 14,8" fill="#201000" />
+      <polygon points="92,2 84,0 86,8" fill="#201000" />
 
-      {/* Orejas de acoplamiento de periféricos */}
-      <rect x="10" y="38" width="8" height="24" rx="3" fill="#150800" stroke="#ff9500" strokeWidth="1.5" />
-      <rect x="82" y="38" width="8" height="24" rx="3" fill="#150800" stroke="#ff9500" strokeWidth="1.5" />
+      {/* CRÁNEO POLIGONAL (Estructura Reforzada) */}
+      <path 
+        d="M25 18 H75 L86 38 L82 58 L75 56 L70 72 L60 74 L58 88 H42 L40 74 L30 72 L25 58 L14 38 Z" 
+        stroke="#201000" 
+        strokeWidth="3" 
+        strokeLinejoin="miter" 
+      />
 
-      {/* Bloque del Chasis Principal (Cuerpo) */}
-      <rect x="18" y="24" width="64" height="52" rx="10" fill="#1c0a00" stroke="#ff9500" strokeWidth="2" />
+      {/* VISORES OCULARES (Más grandes para imponer) */}
+      <path d="M24 40 L46 45 L44 56 L26 52 Z" fill="#201000" />
+      <path d="M76 40 L54 45 L56 56 L74 52 Z" fill="#201000" />
 
-      {/* Visor LCD interno del Bot */}
-      <rect x="26" y="34" width="48" height="20" rx="4" fill="#0d0400" stroke="#ff9500" strokeWidth="1" />
+      {/* PUPILAS LCD (Píxel vacío) */}
+      <rect x="34" y="47" width="6" height="4" fill="transparent" stroke="#fff3dd" strokeWidth="1" className="animate-pulse" />
+      <rect x="60" y="47" width="6" height="4" fill="transparent" stroke="#fff3dd" strokeWidth="1" className="animate-pulse" />
 
-      {/* Opciones de Matrices de Píxeles (Ojos Digitales) */}
-      <circle cx="38" cy="44" r="4" fill="#ff9500" />
-      <circle cx="38" cy="44" r="1.5" fill="#000" />
-      <circle cx="62" cy="44" r="4" fill="#ff9500" />
-      <circle cx="62" cy="44" r="1.5" fill="#000" />
+      {/* FOSA NASAL TÁCTICA */}
+      <polygon points="50,54 42,65 58,65" fill="#201000" />
 
-      {/* Líneas de Escaneo del Pecho (Estado de Buffers) */}
-      <line x1="32" y1="62" x2="68" y2="62" stroke="#ff9500" strokeWidth="1.5" strokeLinecap="round" />
-      <line x1="38" y1="67" x2="62" y2="67" stroke="#ff9500" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 2" />
-      <line x1="44" y1="71" x2="56" y2="71" stroke="#ff9500" strokeWidth="1.5" strokeLinecap="round" />
+      {/* MANDÍBULA DISIPADORA */}
+      <path d="M38 74 L40 88 H60 L62 74" stroke="#201000" strokeWidth="2" />
+      <line x1="46" y1="74" x2="46" y2="88" stroke="#201000" strokeWidth="2" />
+      <line x1="54" y1="74" x2="54" y2="88" stroke="#201000" strokeWidth="2" />
+      <line x1="25" y1="70" x2="75" y2="70" stroke="#201000" strokeWidth="3" />
     </svg>
   );
 }
