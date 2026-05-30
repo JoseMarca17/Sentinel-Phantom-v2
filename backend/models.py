@@ -3,13 +3,6 @@ from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean
 from backend.database import Base
 import datetime
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, default="operator")
-
 class IRCapture(Base):
     __tablename__ = "ir_captures"
     id = Column(Integer, primary_key=True, index=True)
@@ -71,3 +64,26 @@ class WiFiClient(Base):
     client_type = Column(String, default="STATION")   
     ip_address = Column(String, nullable=True)       
     last_seen = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    
+ 
+class BLECapture(Base):
+    __tablename__ = "ble_captures"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    mac = Column(String, nullable=False, unique=True, index=True)
+    name = Column(String, default="UNNAMED_NODE")
+    rssi = Column(Integer, nullable=False)
+    vendor = Column(String, default="UNKNOWN")
+    device_type = Column(String, default="GENERIC_BLE") # INFRASTRUCTURE, TRACKER, PERIPHERAL
+    is_tracker = Column(Boolean, default=False)          # Flag crítico para reportes de Anti-Tracking
+    services_map = Column(String, nullable=True)         # Guarda los UUIDs del GATT Explorer como texto JSON
+    last_seen = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="operator", nullable=False) # 'admin' u 'operator'
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)

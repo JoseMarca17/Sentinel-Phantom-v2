@@ -225,8 +225,10 @@ class WiFiSniffer:
             db.close()
 
     def _run_sniffer(self):
+        from scapy.all import conf
         target_iface = self.monitor.monitor_interface
         time.sleep(0.2)
+
         try:
             subprocess.run(["ip", "link", "set", target_iface, "up"], check=True)
         except Exception as e:
@@ -234,12 +236,16 @@ class WiFiSniffer:
             return
 
         print(f"[WIFI SNIFFER] Abriendo socket en {target_iface}")
+
+        # FIX MT7601U: usar pcap en lugar de socket raw nativo
+        # El driver mt7601u no entrega tramas 802.11 al socket L2 estándar en algunos kernels
+        conf.use_pcap = True
+
         s = None
         try:
             from scapy.arch.linux import L2ListenSocket
             s = L2ListenSocket(iface=target_iface, type=0x0003)
 
-            # FIX stop robusto: usar select con timeout en lugar del hack UDP
             while self.is_sniffing:
                 ready = select.select([s.ins], [], [], 0.5)
                 if ready[0]:
@@ -249,15 +255,25 @@ class WiFiSniffer:
 
         except Exception as e:
             print(f"[WIFI SNIFFER CRITICAL] {e}")
+            # Fallback: si L2ListenSocket falla, usar sniff() directo con pcap
+            print("[WIFI SNIFFER] Intentando fallback con sniff() + pcap...")
+            try:
+                from scapy.all import sniff
+                sniff(
+                    iface=target_iface,
+                    prn=self._packet_handler,
+                    stop_filter=lambda x: not self.is_sniffing,
+                    store=0
+                )
+            except Exception as e2:
+                print(f"[WIFI SNIFFER FALLBACK ERR] {e2}")
         finally:
             self.is_sniffing = False
             if s:
                 try:
                     s.close()
-                    print("[WIFI SNIFFER] Socket cerrado.")
                 except Exception:
                     pass
-            # Flush final al salir
             self._flush_to_db()
 
     def start(self):

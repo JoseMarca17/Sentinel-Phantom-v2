@@ -117,12 +117,12 @@ class WiFiMonitor:
         except asyncio.CancelledError:
             pass
 
-    def start_hopping(self, channels: list = None, delay: float = 0.3):
+    def start_hopping(self, channels: list = None, delay: float = 0.5):
+        # FIX: 500ms por canal en lugar de 300ms
+        # Con 300ms pierdes beacons de hotspots móviles (intervalo 300-500ms)
         if channels is None:
             channels = list(range(1, 14))
         self.is_hopping = True
-
-        # FIX: obtener el loop correcto en lugar de asumir que existe
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -130,7 +130,7 @@ class WiFiMonitor:
                     self._channel_hopper(channels, delay)
                 )
             else:
-                print("[WIFI MONITOR ERR] Event loop no activo, hopping no iniciado.")
+                print("[WIFI MONITOR ERR] Event loop no activo.")
         except RuntimeError as e:
             print(f"[WIFI MONITOR ERR] {e}")
 

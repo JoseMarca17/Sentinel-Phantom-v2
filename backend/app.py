@@ -1,4 +1,3 @@
-# backend/app.py
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -6,7 +5,7 @@ from sqlalchemy.orm import Session
 import asyncio
 import subprocess
 from contextlib import asynccontextmanager
-
+import time
 from backend.database import engine, get_db
 import backend.models as models
 
@@ -22,17 +21,19 @@ from backend.drivers.esp32.ir_driver import ir_driver
 from backend.drivers.esp32.rfid_driver import rfid_driver
 from backend.drivers.esp32.nrf24_driver import nrf24_driver
 from backend.drivers.esp32.subghz_driver import subghz_driver
+from backend.drivers.esp32.ble_driver import ble_driver as ble_controller
 
 from backend.drivers.wifi import wifi_monitor, wifi_sniffer, wifi_lan, wifi_driver
-from backend.config import INTERFACE_ATTACK, INTERFACE_MONITOR  # ← importar ambas
+from backend.config import INTERFACE_ATTACK, INTERFACE_MONITOR  
+
+from backend.auth import router as auth_router, seed_admin
+from backend.database import SessionLocal  
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ─── STARTUP ───
     print("[C2 BOOT] Asegurando estado inicial limpio del hardware inalámbrico...")
     try:
-        # Solo tocar INTERFACE_ATTACK, nunca INTERFACE_MONITOR (wlo1)
         subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "down"], capture_output=True)
         subprocess.run(["iw", "dev", INTERFACE_ATTACK, "set", "type", "managed"], capture_output=True)
         subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "up"], capture_output=True)
@@ -40,8 +41,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[C2 BOOT WARNING] {e}")
 
-    serial_bridge.socket_manager = socket_manager
+    try:
+        print("[AUTH] Sincronizando base de datos de operadores...")
+        db_session = SessionLocal()
+        seed_admin(db_session)
+        db_session.close()
+    except Exception as seed_err:
+        print(f"[AUTH CRITICAL WARNING] No se pudo inicializar la persistencia de usuarios: {seed_err}")
 
+    serial_bridge.socket_manager = socket_manager
+    
     def interceptor_read_loop():
         import json
         import time
@@ -68,11 +77,30 @@ async def lifespan(app: FastAPI):
 
                             if hasattr(serial_bridge, 'socket_manager'):
                                 try:
+                                    target_channel = mod.upper()
+                                    if mod.lower() == "wifi_spectrum":
+                                        target_channel = "WIFI_SPECTRUM"
+                                    
+                                    # Normalización para Bluetooth
+                                    if target_channel == "BLE_STREAM" or target_channel == "BLE":
+                                        target_channel = "BLE"
+
+                                    # 🛠️ PARCHE DE CONCURRENCIA UNIFICADO
+                                    # Empaquetamos según el módulo de origen para no romper Wi-Fi, IR ni RFID
+                                    if target_channel == "BLE":
+                                        ws_payload = {
+                                            "module": "BLE",
+                                            "data": data
+                                        }
+                                    else:
+                                        # Mantiene el formato original que tus otras pantallas ya consumen perfectamente
+                                        ws_payload = data
+
                                     loop = asyncio.get_event_loop()
                                     loop.call_soon_threadsafe(
                                         serial_bridge.socket_manager.broadcast_sync,
-                                        mod.upper() if mod.lower() != "wifi_spectrum" else "WIFI_SPECTRUM",
-                                        data
+                                        target_channel,
+                                        ws_payload
                                     )
                                 except RuntimeError:
                                     pass
@@ -89,16 +117,14 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(socket_manager.start_dispatcher())
     print("[C2 BOOT] Pipeline UART -> WebSockets online.")
 
-    yield  # ← ÚNICO yield
-
-    # ─── SHUTDOWN ───
+    yield 
+    
     print("\n[C2 SHUTDOWN] Apagado controlado detectado...")
     try:
         serial_bridge.is_running = False
         if wifi_sniffer.is_sniffing:
             wifi_sniffer.stop()
         wifi_monitor.stop_hopping()
-        # Solo restaurar INTERFACE_ATTACK, nunca tocar INTERFACE_MONITOR
         subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "down"], capture_output=True)
         subprocess.run(["iw", "dev", INTERFACE_ATTACK, "set", "type", "managed"], capture_output=True)
         subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "up"], capture_output=True)
@@ -117,6 +143,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 
 @app.get("/")
 async def root_status():
@@ -236,22 +263,29 @@ async def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
         if success:
             print("[C2 CORE] Indexando adaptador nl80211...")
             await asyncio.sleep(1.5)
-            wifi_monitor.start_hopping(delay=0.3)
+            wifi_monitor.start_hopping(delay=0.5)
             wifi_sniffer.start()
         return {"status": "SUCCESS" if success else "ERROR", "detail": "Modo monitor activo"}
+
+    elif cmd == "REFRESH_SPECTRUM":
+        # Reinicia el sniffer para forzar re-escaneo
+        if wifi_sniffer.is_sniffing:
+            wifi_sniffer.stop()
+            time.sleep(0.5)
+        wifi_sniffer.start()
+        return {"status": "SUCCESS", "detail": "Sniffer reiniciado para refresco de espectro"}
 
     elif cmd == "STOP_MONITOR":
         if wifi_sniffer.is_sniffing:
             wifi_sniffer.stop()
         wifi_monitor.stop_hopping()
-        try:
-            print(f"[C2 CORE] Desmantelando monitor en {INTERFACE_ATTACK}...")
-            # Solo tocar INTERFACE_ATTACK, nunca INTERFACE_MONITOR
-            subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "down"], capture_output=True)
-            subprocess.run(["iw", "dev", INTERFACE_ATTACK, "set", "type", "managed"], capture_output=True)
-            subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "up"], capture_output=True)
-        except Exception:
-            pass
+        if not wifi_lan.is_deauthing:
+            try:
+                subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "down"], capture_output=True)
+                subprocess.run(["iw", "dev", INTERFACE_ATTACK, "set", "type", "managed"], capture_output=True)
+                subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "up"], capture_output=True)
+            except Exception:
+                pass
         return {"status": "SUCCESS", "detail": f"{INTERFACE_ATTACK} restaurada. {INTERFACE_MONITOR} no fue tocada."}
 
     elif cmd == "LINK_NET":
@@ -281,21 +315,28 @@ async def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
         return {"status": "SUCCESS", "detail": f"Proxy DNS activo para {target_ip}"}
 
     elif cmd == "DEAUTH_TARGET":
-        bssid = payload.get("bssid")
-        client = payload.get("client", "FF:FF:FF:FF:FF:FF")
+        bssid      = payload.get("bssid")
+        client     = payload.get("client", "FF:FF:FF:FF:FF:FF")
         current_id = payload.get("currentId", "deauth_burst")
+        channel    = int(payload.get("channel", 6))
+
         if not bssid:
-            return JSONResponse(status_code=400, content={"error": "Falta BSSID objetivo"})
+            return JSONResponse(status_code=400, content={"error": "Falta BSSID"})
+
         wifi_monitor.stop_hopping()
+
         if current_id == "eapol_trap":
-            print(f"[C2 CORE] Armando trampa EAPOL en {bssid}...")
+            # Sniffer EAPOL con MT7601U + deauth con ESP32
+            print(f"[C2 CORE] Trampa EAPOL en {bssid} CH{channel}...")
             wifi_lan.start_handshake_sniffer(INTERFACE_ATTACK, bssid)
-            # Deauth continuo mientras el sniffer espera los 4 frames
-            wifi_lan.trigger_deauth(INTERFACE_ATTACK, bssid, client, count=0, duration=60)
+            # 300 paquetes = ~10 segundos de deauth continuo, suficiente para forzar reconexión
+            wifi_lan.trigger_deauth_esp32_continuo(bssid, client, channel, duration=300)
         else:
-            print(f"[C2 CORE] Deauth continuo en {bssid}...")
-            wifi_lan.trigger_deauth(INTERFACE_ATTACK, bssid, client, count=0, duration=30)
-        return {"status": "SUCCESS", "detail": "Operación de inyección inalámbrica despachada"}
+            # Deauth puro continuo — mandamos en lotes mientras el flag esté activo
+            print(f"[C2 CORE] Deauth ESP32 en {bssid} CH{channel}...")
+            wifi_lan.trigger_deauth_esp32_continuo(bssid, client, channel, duration=500)
+
+        return {"status": "SUCCESS", "detail": f"Deauth ESP32 → CH{channel} {bssid}"}
 
     elif cmd == "STOP_DEAUTH":
         wifi_lan.stop_deauth()
@@ -328,6 +369,91 @@ async def get_wifi_access_points(db: Session = Depends(get_db)):
 async def get_wifi_clients(db: Session = Depends(get_db)):
     clients = db.query(models.WiFiClient).order_by(models.WiFiClient.last_seen.desc()).all()
     return [{"id": c.id, "mac": c.mac, "associated_bssid": c.associated_bssid, "searching_for": c.searching_for, "searching": c.searching_for, "rssi": c.rssi, "client_type": c.client_type, "tipo": c.client_type, "ip_address": c.ip_address, "ip": c.ip_address, "date": c.last_seen.strftime("%d/%m %H:%M:%S") if c.last_seen else ""} for c in clients]
+
+# =====================================================================
+# ─── ENDPOINTS BLE ───
+
+@app.post("/api/ble/action")
+async def trigger_ble_action(payload: dict, db: Session = Depends(get_db)):
+    cmd = payload.get("cmd")
+    print(f"[C2 COMMAND] BLE -> {cmd}")
+
+    if cmd == "SNIFFER_START":
+        target      = payload.get("target_mac", "")
+        anti        = payload.get("anti_tracking", False)
+        ble_controller.start_sniffer(target, anti)
+        mode = "ANTI-TRACKING" if anti else "PROMISCUOUS"
+        return {"status": "OK", "detail": f"Sniffer {mode} activo"}
+
+    elif cmd == "SNIFFER_STOP":
+        ble_controller.stop_sniffer()
+        return {"status": "OK", "detail": "Sniffer detenido"}
+
+    elif cmd == "FLOOD_START":
+        eco      = payload.get("ecosystem", "APPLE")
+        interval = int(payload.get("interval_ms", 30))
+        ble_controller.start_flooding(eco, interval)
+        return {"status": "OK", "detail": f"Flooding {eco} activo"}
+
+    elif cmd == "FLOOD_STOP":
+        ble_controller.stop_advertising()
+        return {"status": "OK", "detail": "Transmisor BLE detenido"}
+
+    elif cmd == "CLONE_BEACON":
+        hex_data = payload.get("hex_data", "")
+        if not hex_data:
+            return JSONResponse(status_code=400, content={"error": "hex_data requerido"})
+        ble_controller.clone_beacon(hex_data)
+        return {"status": "OK", "detail": "Beacon clonado transmitiendo"}
+
+    elif cmd == "GATT_EXPLORE":
+        mac = payload.get("mac", "")
+        if not mac:
+            return JSONResponse(status_code=400, content={"error": "mac requerido"})
+        ble_controller.gatt_explore(mac)
+        return {"status": "OK", "detail": f"GATT explorer → {mac}"}
+
+    elif cmd == "RSSI_TRACK":
+        mac = payload.get("mac", "")
+        if not mac:
+            return JSONResponse(status_code=400, content={"error": "mac requerido"})
+        ble_controller.rssi_track(mac)
+        return {"status": "OK", "detail": f"RSSI tracker → {mac}"}
+
+    return JSONResponse(status_code=400, content={"error": "Comando BLE desconocido"})
+
+
+@app.get("/api/ble/devices")
+async def get_ble_devices(db: Session = Depends(get_db)):
+    devices = db.query(models.BLECapture).order_by(
+        models.BLECapture.rssi.desc()
+    ).limit(50).all()
+    return [{
+        "id":         d.id,
+        "mac":        d.mac,
+        "name":       d.name,
+        "rssi":       d.rssi,
+        "vendor":     d.vendor,
+        "type":       d.device_type,
+        "is_tracker": d.is_tracker,
+        "last_seen":  d.last_seen.strftime("%d/%m %H:%M:%S") if d.last_seen else ""
+    } for d in devices]
+
+
+@app.get("/api/ble/trackers")
+async def get_ble_trackers(db: Session = Depends(get_db)):
+    trackers = db.query(models.BLECapture).filter(
+        models.BLECapture.is_tracker == True
+    ).order_by(models.BLECapture.rssi.desc()).all()
+    return [{
+        "id":        t.id,
+        "mac":       t.mac,
+        "name":      t.name,
+        "vendor":    t.vendor,
+        "rssi":      t.rssi,
+        "last_seen": t.last_seen.strftime("%d/%m %H:%M:%S") if t.last_seen else ""
+    } for t in trackers]
+
 
 @app.websocket("/ws/control")
 async def websocket_endpoint(websocket: WebSocket):

