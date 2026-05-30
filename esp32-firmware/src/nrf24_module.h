@@ -42,7 +42,7 @@ private:
     uint8_t _spectrum[NRF_CHANNELS];
     uint8_t _junk[32];
     
-    static const uint8_t BLE_CHS[3];
+    static const uint8_t BLE_CHS[40];
     static const uint8_t WIFI_CHS[3];
     
     bool _initRadio(RF24& radio, uint8_t otherCS);

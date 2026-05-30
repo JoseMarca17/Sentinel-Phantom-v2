@@ -1,227 +1,195 @@
+// src/modules/ble_module.cpp
 #include "ble_module.h"
-#include "config.h"
+#include "serial_protocol.h"
 
 BLEModule BLEMod;
 
-static const char* TRACKER_UUIDS[] = {
-    "FD6F",
-    "FEBE",
-    "FEAA",
-    "FE9F",
-    nullptr
-};
+// CORRECCIÓN: Firma corregida sin el puntero erróneo
+void PhantomBLECallbacks::onResult(BLEAdvertisedDevice advertisedDevice) {
+    BLEMod.processCapturedDevice(advertisedDevice);
+}
 
-static const char* CAMERA_NAMES[] = {
-    "IPC",
-    "CAM",
-    "IPCAM",
-    "CAMERA",
-    "XIAOMI",
-    "WYZE",
-    nullptr
-};
+BLEModule::BLEModule() {
+    pBLEScan = nullptr;
+    isScanning = false;
+    filterMacAddress = "";
+    antiTrackingMode = false;
+    lastScanTime = 0;
+}
 
 bool BLEModule::begin() {
-
     try {
-
-        NimBLEDevice::init(DEVICE_NAME);
-
-        NimBLEDevice::setPower(
-            ESP_PWR_LVL_P9
-        );
-
-        _scanner = NimBLEDevice::getScan();
-
-        if (!_scanner) {
-            _ready = false;
-            return false;
-        }
-
-        _scanner->setActiveScan(true);
-        _scanner->setInterval(100);
-        _scanner->setWindow(99);
-
-        _ready = true;
+        BLEDevice::init("SENTINEL_PHANTOM_NODE");
+        
+        pBLEScan = BLEDevice::getScan();
+        pBLEScan->setAdvertisedDeviceCallbacks(new PhantomBLECallbacks());
+        
+        pBLEScan->setActiveScan(false); 
+        pBLEScan->setInterval(100);
+        pBLEScan->setWindow(99);
+        
         return true;
-    }
-    catch (...) {
-
-        _ready = false;
+    } catch (...) {
         return false;
     }
 }
 
-void BLEModule::scan(JsonDocument& result) {
+void BLEModule::startSniffer(String targetMac, bool antiTracking, JsonDocument& response) {
+    filterMacAddress = targetMac;
+    filterMacAddress.toLowerCase();
+    antiTrackingMode = antiTracking;
+    isScanning = true;
+    lastScanTime = millis();
+    
+    pBLEScan->start(0, nullptr, false);
+    
+    response["success"] = true;
+    response["status"] = "sniffer_active";
+    response["filtered_target"] = (targetMac.length() > 0) ? targetMac : "ALL";
+    response["anti_tracking"] = antiTracking;
+}
 
-    if (!_ready) {
-        result["error"] = "BLE not ready";
+void BLEModule::stopSniffer(JsonDocument& response) {
+    if (isScanning) {
+        pBLEScan->stop();
+        isScanning = false;
+    }
+    pBLEScan->clearResults();
+    response["success"] = true;
+    response["status"] = "sniffer_stopped";
+}
+
+// CORRECCIÓN: Operadores cambiados de '->' a '.' al recibir el objeto directamente
+void BLEModule::parseManufacturerPayload(BLEAdvertisedDevice device, JsonObject& targetJson) {
+    std::string data = device.getManufacturerData();
+    if (data.length() < 2) {
+        targetJson["type"] = "GENERIC_BLE";
+        targetJson["vendor"] = "UNKNOWN";
+        targetJson["is_tracker"] = false;
         return;
     }
 
-    NimBLEScanResults res =
-        _scanner->start(5, false);
+    uint16_t companyId = (data[1] << 8) | data[0];
+    targetJson["company_id"] = companyId;
 
-    JsonArray devs =
-        result["devices"].to<JsonArray>();
-
-    int trackers = 0;
-    int cameras = 0;
-
-    for (int i = 0;
-         i < res.getCount() && i < 50;
-         i++) {
-
-        NimBLEAdvertisedDevice dev =
-            res.getDevice(i);
-
-        JsonObject o =
-            devs.add<JsonObject>();
-
-        o["address"] =
-            dev.getAddress().toString().c_str();
-
-        o["name"] =
-            dev.haveName()
-            ? dev.getName().c_str()
-            : "";
-
-        o["rssi"] =
-            dev.getRSSI();
-
-        o["distance"] =
-            _dist(dev.getRSSI());
-
-        bool tr = _isTracker(&dev);
-        bool ca = _isCamera(&dev);
-
-        o["is_tracker"] = tr;
-        o["is_camera"] = ca;
-
-        if (tr) trackers++;
-        if (ca) cameras++;
-
-        if (dev.haveManufacturerData()) {
-
-            std::string mfr =
-                dev.getManufacturerData();
-
-            String hex = "";
-
-            for (size_t j = 0;
-                 j < mfr.size();
-                 j++) {
-
-                char b[3];
-
-                sprintf(
-                    b,
-                    "%02X",
-                    (uint8_t)mfr[j]
-                );
-
-                hex += b;
+    switch (companyId) {
+        case 0x004C:
+            targetJson["vendor"] = "Apple Inc.";
+            if (data.length() >= 22 && data[2] == 0x12) {
+                targetJson["type"] = "TRACKER_DEVICE";
+                targetJson["subtype"] = "Apple AirTag";
+                targetJson["is_tracker"] = true;
+            } else {
+                targetJson["type"] = "PERIPHERAL";
+                targetJson["is_tracker"] = false;
             }
+            break;
 
-            o["manufacturer_data"] = hex;
-        }
+        case 0x0075:
+            targetJson["vendor"] = "Samsung Electronics";
+            if (data.length() >= 15 && data[2] == 0x01) {
+                targetJson["type"] = "TRACKER_DEVICE";
+                targetJson["subtype"] = "Samsung SmartTag";
+                targetJson["is_tracker"] = true;
+            } else {
+                targetJson["type"] = "PERIPHERAL";
+                targetJson["is_tracker"] = false;
+            }
+            break;
+
+        case 0x0006:
+            targetJson["vendor"] = "Microsoft Corp.";
+            targetJson["type"] = "INFRASTRUCTURE";
+            targetJson["is_tracker"] = false;
+            break;
+
+        case 0x03E0:
+            targetJson["vendor"] = "Google LLC";
+            targetJson["type"] = "INFRASTRUCTURE";
+            targetJson["is_tracker"] = false;
+            break;
+
+        default:
+            targetJson["vendor"] = "GENERIC_VENDOR";
+            targetJson["type"] = "UNKNOWN";
+            targetJson["is_tracker"] = false;
+            break;
     }
-
-    result["count"] = res.getCount();
-    result["trackers"] = trackers;
-    result["cameras"] = cameras;
-
-    _scanner->clearResults();
 }
 
-void BLEModule::startFakeBeacon(
-    const char* name,
-    const char* uuid
-) {
+// CORRECCIÓN: Acceso por punto '.' para interactuar con el objeto directo
+void BLEModule::processCapturedDevice(BLEAdvertisedDevice device) {
+    if (!isScanning) return;
 
-    if (!_ready) return;
+    String currentMac = String(device.getAddress().toString().c_str());
+    currentMac.toLowerCase();
 
-    _adv = NimBLEDevice::getAdvertising();
-
-    if (!_adv) return;
-
-    NimBLEAdvertisementData data;
-
-    data.setName(name);
-
-    if (uuid && strlen(uuid) > 0) {
-        data.setCompleteServices(
-            NimBLEUUID(uuid)
-        );
+    if (filterMacAddress.length() > 0 && currentMac != filterMacAddress) {
+        return;
     }
 
-    _adv->setAdvertisementData(data);
-    _adv->start();
+    JsonDocument outDoc;
+    JsonObject obj = outDoc.to<JsonObject>();
 
-    _adving = true;
-}
+    obj["mac"] = currentMac;
+    obj["name"] = device.haveName() ? device.getName().c_str() : "UNNAMED_NODE";
+    obj["rssi"] = device.getRSSI();
 
-void BLEModule::stopFakeBeacon() {
-
-    if (_adv) {
-        _adv->stop();
+    if (device.haveManufacturerData()) {
+        parseManufacturerPayload(device, obj);
+    } else {
+        obj["type"] = "GENERIC_BLE";
+        obj["vendor"] = "UNKNOWN";
+        obj["is_tracker"] = false;
     }
 
-    _adving = false;
-}
-
-bool BLEModule::_isTracker(
-    NimBLEAdvertisedDevice* d
-) {
-
-    for (int i = 0;
-         TRACKER_UUIDS[i];
-         i++) {
-
-        if (
-            d->haveServiceUUID() &&
-            d->isAdvertisingService(
-                NimBLEUUID(TRACKER_UUIDS[i])
-            )
-        ) {
-            return true;
-        }
+    if (antiTrackingMode && !obj["is_tracker"]) {
+        return;
     }
 
-    return false;
+    Protocol.sendData("BLE_STREAM", outDoc);
 }
 
-bool BLEModule::_isCamera(
-    NimBLEAdvertisedDevice* d
-) {
+bool BLEModule::connectGATT(String targetMac, JsonDocument& response) {
+    if (isScanning) {
+        pBLEScan->stop();
+    }
 
-    if (!d->haveName()) {
+    BLEAddress targetAddr(targetMac.c_str());
+    BLEClient* pClient = BLEDevice::createClient();
+    
+    if (!pClient->connect(targetAddr)) {
+        response["success"] = false;
+        response["error"] = "connection_failed";
+        if (isScanning) pBLEScan->start(0, nullptr, false);
         return false;
     }
 
-    String n =
-        d->getName().c_str();
+    std::map<std::string, BLERemoteService*>* pServices = pClient->getServices();
+    JsonArray servArr = response["services"].to<JsonArray>();
 
-    n.toUpperCase();
-
-    for (int i = 0;
-         CAMERA_NAMES[i];
-         i++) {
-
-        if (n.indexOf(CAMERA_NAMES[i]) >= 0) {
-            return true;
-        }
+    for (auto it = pServices->begin(); it != pServices->end(); ++it) {
+        servArr.add(it->first.c_str());
     }
 
-    return false;
+    pClient->disconnect();
+    delete pClient;
+
+    response["mac"] = targetMac;
+    response["success"] = true;
+
+    if (isScanning) {
+        pBLEScan->start(0, nullptr, false);
+    }
+
+    return true;
 }
 
-int BLEModule::_dist(int rssi) {
-
-    if (rssi >= -50) return 1;
-    if (rssi >= -65) return 3;
-    if (rssi >= -75) return 7;
-    if (rssi >= -85) return 15;
-
-    return 30;
+void BLEModule::loopTick() {
+    // Con NimBLE, el manejo de memoria interna es automático. 
+    // Solo reiniciamos el escaneo de fondo si es estrictamente necesario por tiempo.
+    if (isScanning && (millis() - lastScanTime > 10000)) {
+        lastScanTime = millis();
+        // NimBLE no necesita clearResults(), se gestiona solo.
+    }
 }

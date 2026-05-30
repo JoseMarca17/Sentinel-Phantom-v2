@@ -3,9 +3,12 @@
 
 NRF24Module NRF24;
 
-const uint8_t NRF24Module::BLE_CHS[3]  = {2, 26, 80};
-const uint8_t NRF24Module::WIFI_CHS[3] = {1, 6, 11};
-
+const uint8_t NRF24Module::BLE_CHS[40] = {
+    0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,
+    20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39
+};
+// WiFi ch1=2412→nRF ch12, ch6=2437→nRF ch37, ch11=2462→nRF ch62
+const uint8_t NRF24Module::WIFI_CHS[3] = {12, 37, 62};
 bool NRF24Module::begin() {
     pinMode(PIN_NRF1_CS, OUTPUT);
     digitalWrite(PIN_NRF1_CS, HIGH);

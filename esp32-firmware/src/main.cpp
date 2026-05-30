@@ -46,6 +46,10 @@ void heartbeat() {
 void setup() {
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
+    
+    // CORRECCIÓN: Evita el desbordamiento de búfer al recibir respuestas de streams
+    Serial.setRxBufferSize(2048);
+    
     Serial.begin(115200);
     Protocol.begin(); 
     delay(1000);
@@ -108,13 +112,36 @@ void handleWIFI(Command &cmd) {
     }
 }
 
+// CORRECCIÓN: Integración de rutas analíticas para el módulo BLE
 void handleBLE(Command &cmd) {
     if (!BLE_SYS.ready) { Protocol.sendError("BLE", "module offline"); return; }
     JsonDocument d;
-    if (cmd.cmd == "SCAN") {
-        BLEMod.scan(d);
+    String mode = cmd.cmd;
+    mode.toUpperCase();
+    
+    if (mode == "SNIFFER_START" || mode == "SCAN") {
+        String targetMac = cmd.params["target_mac"] | "";
+        bool antiTracking = cmd.params["anti_tracking"] | false;
+        BLEMod.startSniffer(targetMac, antiTracking, d);
         Protocol.sendData("BLE", d);
-    } else {
+    } 
+    else if (mode == "SNIFFER_STOP") {
+        BLEMod.stopSniffer(d);
+        Protocol.sendData("BLE", d);
+    }
+    else if (mode == "GATT_CONNECT") {
+        String targetMac = cmd.params["mac"] | "";
+        if (targetMac.length() == 0) {
+            d["success"] = false;
+            d["error"] = "missing_mac_param";
+            Protocol.sendData("BLE", d);
+            return;
+        }
+        bool success = BLEMod.connectGATT(targetMac, d);
+        d["success"] = success;
+        Protocol.sendData("BLE", d);
+    } 
+    else {
         Protocol.sendError("BLE", "unknown command");
     }
 }
@@ -129,7 +156,6 @@ void handleSUBGHZ(Command &cmd) {
     } 
     else if (cmd.cmd == "CAPTURE") {
         float freq = cmd.params["freq_mhz"] | 433.92f;
-        // La función rellenará el array de "timings" medidos por la ISR
         SubGHz.capture(freq, d);
         Protocol.sendData("SUBGHZ", d); 
     } 
@@ -144,7 +170,6 @@ void handleSUBGHZ(Command &cmd) {
             return;
         }
         
-        // El ESP32 modula físicamente la antena clonando la señal
         SubGHz.replay(freq, hexPayload, d);
         Protocol.sendData("SUBGHZ", d);
     } 
@@ -167,7 +192,6 @@ void handleRFID(Command &cmd) {
         RFIDMod.readCard(d);
         Protocol.sendData("RFID", d);
     } else if (cmd.cmd == "DUMP") {
-        // RFIDMod.dumpMifare(d);
         bool dumpOk = RFIDMod.dumpMifare(d);
         d["success"] = dumpOk;
         Protocol.sendData("RFID", d);
@@ -180,7 +204,6 @@ void handleRFID(Command &cmd) {
             return;
         }
         
-        // Llamada física al PN532
         RFIDMod.cloneUID(targetUid, d);
         Protocol.sendData("RFID", d);
     } else {
@@ -206,7 +229,6 @@ void handleNRF24(Command &cmd) {
         d["status"] = "stopped";
         Protocol.sendData("NRF24", d);
     } 
-    // AGREGADO: Disparador para activar el Jammer del nRF24
     else if (cmd.cmd == "JAM_START") {
         String modeStr = cmd.params["mode"] | "SINGLE";
         uint8_t ch = cmd.params["channel"] | 50;
@@ -220,7 +242,6 @@ void handleNRF24(Command &cmd) {
         d["channel"] = ch;
         Protocol.sendData("NRF24", d);
     } 
-    // AGREGADO: Disparador para apagar el Jammer del nRF24
     else if (cmd.cmd == "JAM_STOP") {
         NRF24.stopJammer();
         d["status"] = "jamming_stopped";
@@ -252,7 +273,12 @@ void loop() {
     heartbeat();
     if (NRF_SYS.ready) {
         NRF24.monitorTick();
-        NRF24.jamTick(); // Esto procesa el bucle continuo asíncrono
+        NRF24.jamTick(); 
+    }
+    
+    // CORRECCIÓN: Hilo asíncrono para evitar desbordamiento del caché BLE
+    if (BLE_SYS.ready) {
+        BLEMod.loopTick();
     }
     
     if (!Protocol.available()) {
@@ -280,7 +306,6 @@ void loop() {
         Protocol.sendError("SYS", "unknown module");
     }
 
-    // Limpieza de buffer
     while (PHANTOM_SERIAL.available() > 0) {
         PHANTOM_SERIAL.read(); 
     }
