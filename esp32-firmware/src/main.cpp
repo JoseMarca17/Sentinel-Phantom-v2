@@ -107,6 +107,23 @@ void handleWIFI(Command &cmd) {
     if (cmd.cmd == "SCAN") {
         WiFiMod.scan(d);
         Protocol.sendData("WIFI", d);
+    } else if (cmd.cmd == "DEAUTH") {
+        const char* bssid   = cmd.params["bssid"]   | "";
+        const char* client  = cmd.params["client"]  | "FF:FF:FF:FF:FF:FF";
+        int channel         = cmd.params["channel"] | 6;
+        int count           = cmd.params["count"]   | 200;
+
+        if (strlen(bssid) == 0) {
+            Protocol.sendError("WIFI", "missing bssid");
+            return;
+        }
+
+        WiFiMod.deauth(bssid, client, channel, count);
+        d["status"]  = "OK";
+        d["bssid"]   = bssid;
+        d["channel"] = channel;
+        d["count"]   = count;
+        Protocol.sendData("WIFI", d);
     } else {
         Protocol.sendError("WIFI", "unknown command");
     }
@@ -125,22 +142,44 @@ void handleBLE(Command &cmd) {
         BLEMod.startSniffer(targetMac, antiTracking, d);
         Protocol.sendData("BLE", d);
     } 
-    else if (mode == "SNIFFER_STOP") {
+    else if (mode == "SNIFFER_STOP" || mode == "FLOOD_STOP" || mode == "REPLAY_STOP") {
         BLEMod.stopSniffer(d);
+        BLEMod.stopAdvertising(d);
+        Protocol.sendData("BLE", d);
+    }
+    else if (mode == "FLOOD_START") {
+        String ecosystem = cmd.params["ecosystem"] | "APPLE";
+        uint16_t interval = cmd.params["interval_ms"] | 30;
+        BLEMod.startFlooding(ecosystem, interval, d);
+        Protocol.sendData("BLE", d);
+    }
+    else if (mode == "CLONE_BEACON") {
+        const char* hexData = cmd.params["hex_data"] | "";
+        if (strlen(hexData) == 0) {
+            Protocol.sendError("BLE", "missing_hex_payload");
+            return;
+        }
+        BLEMod.cloneBeacon(hexData, d);
         Protocol.sendData("BLE", d);
     }
     else if (mode == "GATT_CONNECT") {
         String targetMac = cmd.params["mac"] | "";
         if (targetMac.length() == 0) {
-            d["success"] = false;
-            d["error"] = "missing_mac_param";
-            Protocol.sendData("BLE", d);
+            Protocol.sendError("BLE", "missing_mac");
             return;
         }
-        bool success = BLEMod.connectGATT(targetMac, d);
-        d["success"] = success;
+        BLEMod.connectGATT(targetMac, d);
         Protocol.sendData("BLE", d);
-    } 
+    }
+    else if (mode == "BRUTE_FORCE_STEP") {
+        String targetMac = cmd.params["mac"] | "";
+        const char* sUuid = cmd.params["service_uuid"] | "";
+        const char* cUuid = cmd.params["char_uuid"] | "";
+        uint32_t attemptCode = cmd.params["code"] | 0;
+        
+        BLEMod.runBruteForceStep(targetMac, sUuid, cUuid, attemptCode, d);
+        Protocol.sendData("BLE", d);
+    }
     else {
         Protocol.sendError("BLE", "unknown command");
     }

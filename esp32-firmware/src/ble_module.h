@@ -9,37 +9,41 @@
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 
-/**
- * @brief Callbacks de la antena adaptados a tu versión exacta del Framework.
- */
 class PhantomBLECallbacks : public BLEAdvertisedDeviceCallbacks {
 public:
-    // CORRECCIÓN: Pasado por valor exacto como exige tu framework
     void onResult(BLEAdvertisedDevice advertisedDevice) override;
 };
 
 class BLEModule {
 private:
     BLEScan* pBLEScan;
+    BLEAdvertising* pAdvertising;
     bool isScanning;
+    bool isAdvertising;
     String filterMacAddress;
     bool antiTrackingMode;
     uint32_t lastScanTime;
 
-    // CORRECCIÓN: Ajustado a valor para consistencia interna
     void parseManufacturerPayload(BLEAdvertisedDevice device, JsonObject& targetJson);
 
 public:
     BLEModule();
     bool begin();
     
+    // Operaciones Pasivas (1, 2, 3)
     void startSniffer(String targetMac, bool antiTracking, JsonDocument& response);
     void stopSniffer(JsonDocument& response);
+    
+    // Operaciones Activas / Inyección (4, 5)
+    void startFlooding(String ecosystem, uint16_t intervalMs, JsonDocument& response);
+    void cloneBeacon(const char* hexPayload, JsonDocument& response);
+    void stopAdvertising(JsonDocument& response);
+    
+    // Auditoría IoT (7)
     bool connectGATT(String targetMac, JsonDocument& response);
+    void runBruteForceStep(String targetMac, const char* serviceUuid, const char* charUuid, uint32_t code, JsonDocument& response);
     
     void loopTick();
-    
-    // CORRECCIÓN: Ajustado a valor
     void processCapturedDevice(BLEAdvertisedDevice device);
 };
 
