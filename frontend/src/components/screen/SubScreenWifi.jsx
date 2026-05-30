@@ -137,13 +137,15 @@ export default function SubScreenWifi({ lastAction }) {
 
     if (tier === 'action') {
       if (type === 'BACK' || type === 'LEFT') {
-        sendC2Action("STOP_MONITOR");
-        sendC2Action("STOP_DEAUTH");
+        sendC2Action("STOP_DEAUTH");           // primero detener ataque
+        setTimeout(() => {
+            sendC2Action("STOP_MONITOR");      // luego bajar interfaz
+        }, 500);
         setIsInjecting(false);
         setStatusLog("ANTENNA: PASSIVE_STANDBY");
         setMonitorLog("CORE: HARDWARE REPLEGADO CON ÉXITO");
         setTier('sub_menu');
-      }
+     }
       return;
     }
 

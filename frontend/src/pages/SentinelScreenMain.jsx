@@ -7,6 +7,8 @@ import SubScreenRfid from '../components/screen/SubScreenRfid';
 import SubScreenNrf from '../components/screen/SubScreenNrf';
 import SubScreenSubghz from '../components/screen/SubScreenSubghz';
 import SubScreenWifi from '../components/screen/SubScreenWifi';
+// CORRECCIÓN: Ruta de importación alineada a tu arquitectura de pantallas tácticas
+import SubScreenBle from "../components/screen/SubScreenBluetooth"
 
 const MODS = [
   { id: 'ir', name: 'IR', full: 'INFRARROJO IR', sub: 'TV-B-GONE / RAW INJECT', status: 'ONLINE' },
@@ -87,7 +89,6 @@ export default function SentinelScreenMain() {
     ...MODS[(idx + off + MODS.length) % MODS.length], off,
   }));
 
-  // FIX CRÍTICO: Forzamos el color de fondo sepia plano en el Inline Style para anular a SentinelShell
   const lcdStyle = {
     backgroundColor: '#ff9f1a',
     color: '#201000',
@@ -97,7 +98,6 @@ export default function SentinelScreenMain() {
     <SentinelShell onAction={handleAction} booted={booted} statusText={inModule ? "MOD_ACTIVE" : "MAIN_HUB"}>
       {!booted ? (
         <div className="flex-1 flex flex-col items-center justify-between p-4 relative overflow-hidden" style={lcdStyle}>
-          {/* Scanline Effect */}
           <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(32,16,0,1) 1px, transparent 1px)', backgroundSize: '100% 3px' }} />
           
           <div className="w-full flex justify-between text-[8px] font-black opacity-40 border-b border-[#201000]/20 pb-1 uppercase tracking-tighter">
@@ -122,9 +122,9 @@ export default function SentinelScreenMain() {
       ) : inModule && activeMod.id === 'nrf' ? ( <SubScreenNrf lastAction={actionPayload} />
       ) : inModule && activeMod.id === 'subghz' ? ( <SubScreenSubghz lastAction={actionPayload} />
       ) : inModule && activeMod.id === 'wifi' ? ( <SubScreenWifi lastAction={actionPayload} />
+      ) : inModule && activeMod.id === 'bt' ? ( <SubScreenBle lastAction={actionPayload} /> // CORRECCIÓN: Inyección del submódulo Bluetooth
       ) : (
         <div className="flex-1 flex flex-col p-3 sm:p-5 justify-between h-full relative" style={lcdStyle}>
-          {/* Malla de Píxeles de Fondo */}
           <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{ backgroundImage: 'radial-gradient(#201000 0.5px, transparent 0.5px)', backgroundSize: '8px 8px' }} />
 
           <div className="flex justify-between items-end border-b-2 border-[#201000] pb-1">
@@ -132,7 +132,6 @@ export default function SentinelScreenMain() {
             <span className="text-[10px] font-black">{idx + 1}/{MODS.length}</span>
           </div>
 
-          {/* Área Central */}
           <div className="flex-1 flex items-center justify-center relative my-4">
              <div className="hidden sm:block absolute left-4 opacity-10 w-16 h-16">
                 <ModuleIcon id={visibleCards[0].id} active={false} />
@@ -154,14 +153,12 @@ export default function SentinelScreenMain() {
              </div>
           </div>
 
-          {/* Datos del Módulo */}
           <div className="space-y-1 relative z-10">
             <div className="flex items-center gap-2">
               <span className="bg-[#201000] text-[#fff3dd] text-[10px] font-black px-2 py-0.5 rounded-sm tracking-widest uppercase">{activeMod.name}</span>
               <div className="h-[2px] flex-1 bg-[#201000]/20" />
             </div>
             
-            {/* Cambiado bg-black/5 a una opacidad pura del color sepia oscuro */}
             <div className="p-2 border-2 border-[#201000] bg-[#201000]/5 rounded-sm">
               <h3 className="text-xs sm:text-sm font-black truncate">{activeMod.full}</h3>
               <div className="flex justify-between items-center">

