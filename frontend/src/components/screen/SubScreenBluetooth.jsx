@@ -42,7 +42,7 @@ export default function SubScreenBle({ lastAction }) {
 
   const sendC2 = async (cmd, params = {}) => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/ble/action", {
+      const res = await fetch("http://${raspberryIp}:8000/api/ble/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...params })
