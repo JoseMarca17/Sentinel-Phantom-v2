@@ -211,7 +211,7 @@ async def trigger_rfid_action(payload: dict, db: Session = Depends(get_db)):
     return JSONResponse(status_code=400, content={"error": "Unknown tactical RFID command"})
 
 @app.post("/api/nrf24/action")
-async def trigger_nrf_action(payload: dict):
+def trigger_nrf_action(payload: dict):
     cmd = payload.get("cmd")
     if cmd == "SCAN_SPECTRUM":
         return {"status": "OK", "detail": "Barrido solicitado", "transport_success": nrf24_driver.trigger_spectrum_scan()}
@@ -251,7 +251,7 @@ async def get_subghz_history(db: Session = Depends(get_db)):
 # ─── ENDPOINTS WIFI — aquí están los cambios ───
 
 @app.post("/api/wifi/action")
-async def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
+def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
     cmd = payload.get("cmd")
     print(f"[C2 COMMAND] WI-FI -> Directiva táctica recibida: {cmd}")
 
@@ -262,7 +262,7 @@ async def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
         success = wifi_monitor.enable_monitor_mode()
         if success:
             print("[C2 CORE] Indexando adaptador nl80211...")
-            await asyncio.sleep(1.5)
+            asyncio.sleep(1.5)
             wifi_monitor.start_hopping(delay=0.5)
             wifi_sniffer.start()
         return {"status": "SUCCESS" if success else "ERROR", "detail": "Modo monitor activo"}
@@ -374,7 +374,7 @@ async def get_wifi_clients(db: Session = Depends(get_db)):
 # ─── ENDPOINTS BLE ───
 
 @app.post("/api/ble/action")
-async def trigger_ble_action(payload: dict, db: Session = Depends(get_db)):
+def trigger_ble_action(payload: dict, db: Session = Depends(get_db)):
     cmd = payload.get("cmd")
     print(f"[C2 COMMAND] BLE -> {cmd}")
 
