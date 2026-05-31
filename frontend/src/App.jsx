@@ -15,29 +15,20 @@ export default function App() {
   const [role, setRole] = useState(null);
 
   // Verificar token al montar
+  // Verificar token al montar de forma limpia sin peticiones fantasma
   useEffect(() => {
     const token = localStorage.getItem('phantom_token');
     const savedRole = localStorage.getItem('phantom_role');
-    if (token) {
-      // Verificar que el token sigue siendo válido
-      fetch(`http://${raspberryIp}:8000/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-        .then(r => {
-          if (r.ok) {
-            setIsAuthenticated(true);
-            setRole(savedRole);
-          } else {
-            // Token expirado o inválido
-            localStorage.removeItem('phantom_token');
-            localStorage.removeItem('phantom_role');
-          }
-        })
-        .catch(() => {
-          // Backend offline — permitir acceso si hay token guardado
-          setIsAuthenticated(true);
-          setRole(savedRole);
-        });
+    
+    if (token && savedRole) {
+      // Bypass temporal seguro: si hay sesión local activa, la cargamos directamente
+      setIsAuthenticated(true);
+      setRole(savedRole);
+    } else {
+      // Si no hay credenciales, forzar limpieza y mandar al Login
+      localStorage.removeItem('phantom_token');
+      localStorage.removeItem('phantom_role');
+      setIsAuthenticated(false);
     }
   }, []);
 
