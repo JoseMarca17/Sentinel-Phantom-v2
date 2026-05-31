@@ -64,13 +64,15 @@ def render_ui():
         draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((12, 12), "SENTINEL PHANTOM", font=font, fill=255)
         draw.text((24, 26), "[ CORE V2.0 ]", font=font, fill=255)
-        draw.line((15, 40), (112, 40), fill=255)
+        # CORREGIDO: Tupla doble obligatoria para Pillow ((x1, y1), (x2, y2))
+        draw.line(((15, 40), (112, 40)), fill=255)
         draw.text((18, 46), "PRESS OK TO BOOT", font=font, fill=255)
 
     elif current_view == "MENU":
         # Menú Principal
         draw.text((0, 0), "SYS OPTIONS:", font=font, fill=255)
-        draw.line((0, 11, WIDTH, 11), fill=255)
+        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
+        draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
         # Mostrar opciones con scroll adaptativo básico
         start = max(0, current_idx - 3)
@@ -89,7 +91,8 @@ def render_ui():
     elif current_view == "LIVE_WIFI":
         # Interfaz Avanzada Wi-Fi
         draw.text((0, 0), "RF MONITOR: WI-FI", font=font, fill=255)
-        draw.line((0, 11, WIDTH, 11), fill=255)
+        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
+        draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
         if not wifi_networks:
             draw.text((10, 30), "Awaiting targets...", font=font, fill=255)
@@ -107,7 +110,8 @@ def render_ui():
     elif current_view == "LIVE_NRF24":
         # Interfaz Gráfica Avanzada NRF24 (Analizador de Espectro)
         draw.text((0, 0), "NRF24 SPECTRUM BAR", font=font, fill=255)
-        draw.line((0, 11, WIDTH, 11), fill=255)
+        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
+        draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
         # Dibujar 16 columnas para representar los canales de barrido de frecuencia
         col_w = 6
@@ -123,7 +127,8 @@ def render_ui():
 
     elif current_view == "LIVE_DATA":
         draw.text((0, 0), "DATA CAPTURED", font=font, fill=255)
-        draw.line((0, 11, WIDTH, 11), fill=255)
+        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
+        draw.line(((0, 11), (WIDTH, 11)), fill=255)
         draw.text((0, 24), status_text[:21], font=font, fill=255)
         if len(status_text) > 21:
             draw.text((0, 38), status_text[21:42], font=font, fill=255)
