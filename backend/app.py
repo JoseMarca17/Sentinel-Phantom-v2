@@ -278,7 +278,7 @@ async def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
     elif cmd == "STOP_MONITOR":
         if wifi_sniffer.is_sniffing:
             wifi_sniffer.stop()
-        wifi_monitor.stop_hopping()
+        wifi_monitor.stop_hopping() 
         if not wifi_lan.is_deauthing:
             try:
                 subprocess.run(["ip", "link", "set", INTERFACE_ATTACK, "down"], capture_output=True)
@@ -455,11 +455,16 @@ async def get_ble_trackers(db: Session = Depends(get_db)):
     } for t in trackers]
 
 
+# ASÍ DEBE QUEDAR LA SINTAXIS CORRECTA EN PYTHON:
 @app.websocket("/ws/control")
 async def websocket_endpoint(websocket: WebSocket):
     await socket_manager.connect(websocket)
     try:
         while True:
-            await asyncio.sleep(1)
+            data = await websocket.receive_text()
+            pass
     except WebSocketDisconnect:
+        socket_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[WS SYSTEM ERR] Excepción en canal: {e}")
         socket_manager.disconnect(websocket)
