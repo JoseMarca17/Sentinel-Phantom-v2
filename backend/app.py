@@ -56,57 +56,65 @@ async def lifespan(app: FastAPI):
         import time
         import asyncio
 
+        # Acumulador de bytes dinámico para no cortar los JSONs por la mitad
+        serial_buffer = ""
+
         while serial_bridge.is_running:
             if serial_bridge.serial_conn and serial_bridge.serial_conn.in_waiting > 0:
                 try:
-                    line = serial_bridge.serial_conn.readline().decode('utf-8', errors='ignore').strip()
-                    if line and line.startswith('{'):
-                        payload = json.loads(line)
-                        mod = payload.get("mod") or payload.get("module")
+                    # Extraer inmediatamente solo los bytes que ya están listos en el hardware
+                    bytes_disponibles = serial_bridge.serial_conn.in_waiting
+                    raw_bytes = serial_bridge.serial_conn.read(bytes_disponibles)
+                    serial_buffer += raw_bytes.decode('utf-8', errors='ignore')
 
-                        if mod:
-                            if payload.get("status") == "OK" and "data" in payload:
-                                data = payload.get("data")
-                            elif "data" in payload:
-                                data = payload.get("data")
-                            else:
-                                data = payload
+                    # Procesar todas las líneas completas que se hayan armado en el acumulador
+                    while "\n" in serial_buffer:
+                        line, serial_buffer = serial_buffer.split("\n", 1)
+                        line = line.strip()
 
-                            if mod in serial_bridge.drivers:
-                                serial_bridge.drivers[mod].handle_incoming_data(data)
+                        if line and line.startswith('{'):
+                            payload = json.loads(line)
+                            mod = payload.get("mod") or payload.get("module")
 
-                            if hasattr(serial_bridge, 'socket_manager'):
-                                try:
-                                    target_channel = mod.upper()
-                                    if mod.lower() == "wifi_spectrum":
-                                        target_channel = "WIFI_SPECTRUM"
-                                    
-                                    # Normalización para Bluetooth
-                                    if target_channel == "BLE_STREAM" or target_channel == "BLE":
-                                        target_channel = "BLE"
+                            if mod:
+                                if payload.get("status") == "OK" and "data" in payload:
+                                    data = payload.get("data")
+                                elif "data" in payload:
+                                    data = payload.get("data")
+                                else:
+                                    data = payload
 
-                                    # 🛠️ PARCHE DE CONCURRENCIA UNIFICADO
-                                    # Empaquetamos según el módulo de origen para no romper Wi-Fi, IR ni RFID
-                                    if target_channel == "BLE":
-                                        ws_payload = {
-                                            "module": "BLE",
-                                            "data": data
-                                        }
-                                    else:
-                                        # Mantiene el formato original que tus otras pantallas ya consumen perfectamente
-                                        ws_payload = data
+                                if mod in serial_bridge.drivers:
+                                    serial_bridge.drivers[mod].handle_incoming_data(data)
 
-                                    loop = asyncio.get_event_loop()
-                                    loop.call_soon_threadsafe(
-                                        serial_bridge.socket_manager.broadcast_sync,
-                                        target_channel,
-                                        ws_payload
-                                    )
-                                except RuntimeError:
-                                    pass
+                                if hasattr(serial_bridge, 'socket_manager'):
+                                    try:
+                                        target_channel = mod.upper()
+                                        if mod.lower() == "wifi_spectrum":
+                                            target_channel = "WIFI_SPECTRUM"
+                                        
+                                        if target_channel in ["BLE_STREAM", "BLE"]:
+                                            target_channel = "BLE"
+
+                                        if target_channel == "BLE":
+                                            ws_payload = {"module": "BLE", "data": data}
+                                        else:
+                                            ws_payload = data
+
+                                        # Inyección directa e inmediata al lazo de WebSockets
+                                        loop = asyncio.get_event_loop()
+                                        loop.call_soon_threadsafe(
+                                            serial_bridge.socket_manager.broadcast_sync,
+                                            target_channel,
+                                            ws_payload
+                                        )
+                                    except RuntimeError:
+                                        pass
                 except Exception as e:
                     print(f"[SERIAL INTERCEPTOR ERR] {e}")
-            time.sleep(0.001)
+            
+            # Delay mínimo de 5ms para que la CPU de la Pi respire sin acumular lag
+            time.sleep(0.005)
 
     serial_bridge._read_loop = interceptor_read_loop
 
