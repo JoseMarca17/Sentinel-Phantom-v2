@@ -73,7 +73,6 @@ def render_ui():
         draw.text((0, 0), "SYS OPTIONS:", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
-        # Mostrar opciones con scroll adaptativo básico
         start = max(0, current_idx - 3)
         y = 14
         for i in range(start, min(start + 4, len(menu_items))):
@@ -130,42 +129,46 @@ def render_ui():
     oled.image(image)
     oled.show()
 
-# ─── INYECCIÓN DE DIRECTIVAS AL MOTOR FASTAPI ───
+# ─── INYECCIÓN ASÍNCRONA CORREGIDA (NO-BLOQUEANTE) ───
 def trigger_action(option):
     global current_view, status_text, wifi_networks, nrf_channels
     
-    try:
-        if option == 0:
-            current_view = "LIVE_WIFI"
-            wifi_networks = []
-            render_ui()
-            requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=2)
-        elif option == 1:
-            current_view = "LIVE_NRF24"
-            nrf_channels = [0] * 16
-            render_ui()
-            requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=2)
-        elif option == 2:
-            current_view = "EXECUTING"
-            status_text = "Reading RFID..."
-            render_ui()
-            requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=2)
-        elif option == 3:
-            current_view = "EXECUTING"
-            status_text = "IR Receiver Armed..."
-            render_ui()
-            requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=2)
-        elif option == 4:
-            current_view = "EXECUTING"
-            status_text = "BLE Spammer Active"
-            render_ui()
-            requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=2)
-    except Exception:
+    # Configurar la vista local antes de lanzar la petición de red
+    if option == 0:
+        current_view = "LIVE_WIFI"
+        wifi_networks = []
+    elif option == 1:
+        current_view = "LIVE_NRF24"
+        nrf_channels = [0] * 16
+    else:
         current_view = "EXECUTING"
-        status_text = "Link Error to C2"
+        status_text = "Launching cmd..."
+        
     render_ui()
+    
+    # Lanzar peticiones en un hilo separado o con timeout ultracorto 
+    # para que la UI no se quede esperando la respuesta síncrona de FastAPI/UART
+    def async_post():
+        try:
+            if option == 0:
+                requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=0.1)
+            elif option == 1:
+                requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=0.1)
+            elif option == 2:
+                requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=0.1)
+            elif option == 3:
+                requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=0.1)
+            elif option == 4:
+                requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=0.1)
+        except requests.exceptions.Timeout:
+            # Capturamos el timeout intencional para continuar de inmediato
+            pass
+        except Exception:
+            pass
 
-# ─── RECOLECTOR ASÍNCRONO: WEBSOCKETS (TOLERANTE) ───
+    threading.Thread(target=async_post, daemon=True).start()
+
+# ─── RECOLECTOR ASÍNCRONO: WEBSOCKETS (RECIBE EN TIEMPO REAL) ───
 async def websocket_listener():
     global current_view, wifi_networks, nrf_channels, status_text
     while True:
@@ -183,11 +186,10 @@ async def websocket_listener():
                     if not isinstance(payload, dict):
                         continue
                     
-                    # Normalización del módulo y los datos
                     module = str(payload.get("module", payload.get("mod", ""))).upper()
                     data = payload.get("data", payload)
                     
-                    # 1. Filtro dinámico para NRF24 (Soporta múltiples variantes de JSON)
+                    # Interceptar espectro NRF24 en caliente
                     if current_view == "LIVE_NRF24" or module == "NRF24":
                         raw_channels = None
                         if isinstance(data, dict):
@@ -206,7 +208,6 @@ async def websocket_listener():
                                     nrf_channels[idx] = 0
                             render_ui()
                             
-                    # 2. Filtro para Wi-Fi Sniffer
                     elif current_view == "LIVE_WIFI":
                         ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
                         rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
@@ -215,8 +216,6 @@ async def websocket_listener():
                             wifi_networks.append((ssid, int(rssi)))
                             wifi_networks.sort(key=lambda x: x[1], reverse=True)
                             render_ui()
-                            
-                    # 3. Datos estáticos de Capturas (RFID, IR)
                     else:
                         uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
                         proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
@@ -230,9 +229,8 @@ async def websocket_listener():
                             current_view = "LIVE_DATA"
                             render_ui()
                             
-        except Exception as e:
-            print(f"[-] Caída temporal de WebSocket UI: {e}")
-            await asyncio.sleep(2)
+        except Exception:
+            await asyncio.sleep(1)
 
 def start_ws_thread():
     loop = asyncio.new_event_loop()
@@ -266,16 +264,19 @@ def main_hardware_loop():
                 
         elif current_view in ["EXECUTING", "LIVE_WIFI", "LIVE_NRF24", "LIVE_DATA"]:
             if not GPIO.input(BUTTONS["LEFT"]):
-                try:
-                    if current_idx == 0:
-                        requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=1)
-                    elif current_idx == 1:
-                        requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_SCAN"}, timeout=1)
-                    elif current_idx == 4:
-                        requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=1)
-                except:
-                    pass
-                    
+                # Mandar comando de parada de forma asíncrona también
+                def stop_action():
+                    try:
+                        if current_idx == 0:
+                            requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=0.5)
+                        elif current_idx == 1:
+                            requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_SCAN"}, timeout=0.5)
+                        elif current_idx == 4:
+                            requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=0.5)
+                    except:
+                        pass
+                
+                threading.Thread(target=stop_action, daemon=True).start()
                 current_view = "MENU"
                 render_ui()
                 time.sleep(0.3)
