@@ -268,7 +268,7 @@ def trigger_wifi_action(payload: dict, db: Session = Depends(get_db)):
         success = wifi_monitor.enable_monitor_mode()
         if success:
             print("[C2 CORE] Indexando adaptador nl80211...")
-            asyncio.sleep(1.5)
+            time.sleep(1.5)
             wifi_monitor.start_hopping(delay=0.5)
             wifi_sniffer.start()
         return {"status": "SUCCESS" if success else "ERROR", "detail": "Modo monitor activo"}
