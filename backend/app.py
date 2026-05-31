@@ -56,65 +56,63 @@ async def lifespan(app: FastAPI):
         import time
         import asyncio
 
-        # Acumulador de bytes dinámico para no cortar los JSONs por la mitad
-        serial_buffer = ""
+        # Buffer limpio para reconstrucción de líneas
+        line_buffer = bytearray()
 
         while serial_bridge.is_running:
-            if serial_bridge.serial_conn and serial_bridge.serial_conn.in_waiting > 0:
+            if serial_bridge.serial_conn:
                 try:
-                    # Extraer inmediatamente solo los bytes que ya están listos en el hardware
-                    bytes_disponibles = serial_bridge.serial_conn.in_waiting
-                    raw_bytes = serial_bridge.serial_conn.read(bytes_disponibles)
-                    serial_buffer += raw_bytes.decode('utf-8', errors='ignore')
+                    # Si hay bytes esperando en el hardware, procesamos
+                    while serial_bridge.serial_conn.in_waiting > 0:
+                        # Leer un solo byte de inmediato (no bloqueante)
+                        b = serial_bridge.serial_conn.read(1)
+                        if not b:
+                            break
+                        
+                        line_buffer.extend(b)
 
-                    # Procesar todas las líneas completas que se hayan armado en el acumulador
-                    while "\n" in serial_buffer:
-                        line, serial_buffer = serial_buffer.split("\n", 1)
-                        line = line.strip()
+                        # Si encontramos el fin de línea, procesamos el JSON de inmediato
+                        if b == b'\n':
+                            try:
+                                line = line_buffer.decode('utf-8', errors='ignore').strip()
+                                line_buffer.clear() # Limpiar buffer para la siguiente línea
 
-                        if line and line.startswith('{'):
-                            payload = json.loads(line)
-                            mod = payload.get("mod") or payload.get("module")
+                                if line and line.startswith('{'):
+                                    payload = json.loads(line)
+                                    mod = payload.get("mod") or payload.get("module")
 
-                            if mod:
-                                if payload.get("status") == "OK" and "data" in payload:
-                                    data = payload.get("data")
-                                elif "data" in payload:
-                                    data = payload.get("data")
-                                else:
-                                    data = payload
+                                    if mod:
+                                        data = payload.get("data", payload)
 
-                                if mod in serial_bridge.drivers:
-                                    serial_bridge.drivers[mod].handle_incoming_data(data)
+                                        if mod in serial_bridge.drivers:
+                                            serial_bridge.drivers[mod].handle_incoming_data(data)
 
-                                if hasattr(serial_bridge, 'socket_manager'):
-                                    try:
-                                        target_channel = mod.upper()
-                                        if mod.lower() == "wifi_spectrum":
-                                            target_channel = "WIFI_SPECTRUM"
-                                        
-                                        if target_channel in ["BLE_STREAM", "BLE"]:
-                                            target_channel = "BLE"
+                                        if hasattr(serial_bridge, 'socket_manager'):
+                                            target_channel = mod.upper()
+                                            if mod.lower() == "wifi_spectrum":
+                                                target_channel = "WIFI_SPECTRUM"
+                                            
+                                            if target_channel in ["BLE_STREAM", "BLE"]:
+                                                target_channel = "BLE"
 
-                                        if target_channel == "BLE":
-                                            ws_payload = {"module": "BLE", "data": data}
-                                        else:
-                                            ws_payload = data
+                                            ws_payload = {"module": "BLE", "data": data} if target_channel == "BLE" else data
 
-                                        # Inyección directa e inmediata al lazo de WebSockets
-                                        loop = asyncio.get_event_loop()
-                                        loop.call_soon_threadsafe(
-                                            serial_bridge.socket_manager.broadcast_sync,
-                                            target_channel,
-                                            ws_payload
-                                        )
-                                    except RuntimeError:
-                                        pass
+                                            # Transmisión inmediata al WebSocket de la OLED
+                                            loop = asyncio.get_event_loop()
+                                            loop.call_soon_threadsafe(
+                                                serial_bridge.socket_manager.broadcast_sync,
+                                                target_channel,
+                                                ws_payload
+                                            )
+                            except Exception as json_err:
+                                # Si un JSON falla, limpiamos el buffer para no arrastrar basura
+                                line_buffer.clear()
                 except Exception as e:
                     print(f"[SERIAL INTERCEPTOR ERR] {e}")
+                    line_buffer.clear()
             
-            # Delay mínimo de 5ms para que la CPU de la Pi respire sin acumular lag
-            time.sleep(0.005)
+            # Delay mínimo de 1ms para mantener el loop caliente y capturar el flujo continuo
+            time.sleep(0.001)
 
     serial_bridge._read_loop = interceptor_read_loop
 
