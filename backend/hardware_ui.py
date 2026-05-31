@@ -61,7 +61,7 @@ def render_ui():
     
     if current_view == "BANNER":
         # Pantalla de Bienvenida (Estilo Terminal Militar)
-        draw.rect((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
+        draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((12, 12), "SENTINEL PHANTOM", font=font, fill=255)
         draw.text((24, 26), "[ CORE V2.0 ]", font=font, fill=255)
         draw.line((15, 40), (112, 40), fill=255)
@@ -81,9 +81,10 @@ def render_ui():
             y += 12
 
     elif current_view == "EXECUTING":
+        draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((8, 10), ">> EXECUTING <<", font=font, fill=255)
-        draw.text((0, 32), status_text[:21], font=font, fill=255)
-        draw.text((0, 52), "[LEFT] TO ABORT", font=font, fill=255)
+        draw.text((4, 32), status_text[:20], font=font, fill=255)
+        draw.text((4, 52), "[LEFT] TO ABORT", font=font, fill=255)
 
     elif current_view == "LIVE_WIFI":
         # Interfaz Avanzada Wi-Fi
@@ -99,7 +100,7 @@ def render_ui():
                 # Dibujar barra de intensidad gráfica
                 bar_w = max(2, int((rssi + 100) * 0.4)) # Normalización de señal
                 draw.text((0, y), f"{ssid[:10]}", font=font, fill=255)
-                draw.rect((70, y+2, 70+bar_w, y+8), outline=255, fill=255)
+                draw.rectangle((70, y+2, 70+bar_w, y+8), outline=255, fill=255)
                 draw.text((112, y), f"{rssi}", font=font, fill=255)
                 y += 12
 
@@ -116,7 +117,7 @@ def render_ui():
             # Calcular altura de la barra según la saturación de ruido recibida
             bar_h = min(40, int(val * 4)) 
             y = 52 - bar_h
-            draw.rect((x, y, x + col_w, 52), outline=255, fill=255)
+            draw.rectangle((x, y, x + col_w, 52), outline=255, fill=255)
             
         draw.text((0, 54), "2.4G Hz CHANNELS (0-15)", font=font, fill=255)
 
@@ -185,23 +186,18 @@ async def websocket_listener():
                     
                     # 1. Captura e Inyección para Wi-Fi Sniffer en Vivo
                     if current_view == "LIVE_WIFI":
-                        # El sniffer reporta APs mapeados por la antena en modo monitor
                         ssid = data.get("ssid") or payload.get("ssid")
                         rssi = data.get("rssi") or payload.get("rssi")
                         if ssid and rssi:
-                            # Actualizar o añadir red limpiando duplicados
                             wifi_networks = [n for n in wifi_networks if n[0] != ssid]
                             wifi_networks.append((ssid, int(rssi)))
-                            # Ordenar por mejor potencia de señal
                             wifi_networks.sort(key=lambda x: x[1], reverse=True)
                             render_ui()
                             
                     # 2. Captura e Inyección para el Espectro NRF24
                     elif current_view == "LIVE_NRF24" and module == "NRF24":
-                        # Se asume que el ESP32 envía un array de niveles de ruido por canal
                         raw_channels = data.get("channels") or payload.get("channels")
                         if isinstance(raw_channels, list):
-                            # Reducir o acoplar los canales a los 16 bloques de la pantalla OLED
                             for idx in range(min(16, len(raw_channels))):
                                 nrf_channels[idx] = raw_channels[idx]
                             render_ui()
@@ -258,13 +254,12 @@ def main_hardware_loop():
         # 3. Control en Vistas Interactivas o de Ejecución (Retorno)
         elif current_view in ["EXECUTING", "LIVE_WIFI", "LIVE_NRF24", "LIVE_DATA"]:
             if not GPIO.input(BUTTONS["LEFT"]):
-                # Mandar comandos de apagado/parada preventivos al salir del modo
                 try:
-                    if current_idx == 0:   # Parar Wi-Fi Monitor
+                    if current_idx == 0:
                         requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=1)
-                    elif current_idx == 1: # Parar NRF24 Jammer/Scan
-                        requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=1)
-                    elif current_idx == 4: # Parar BLE Flood
+                    elif current_idx == 1:
+                        requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_SCAN"}, timeout=1)
+                    elif current_idx == 4:
                         requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=1)
                 except:
                     pass
