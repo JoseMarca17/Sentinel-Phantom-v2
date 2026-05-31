@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Database, Clock, Activity, Cpu } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function DbIr() {
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchIr = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/ir/signals");
+      const res = await fetch("http://${raspberryIp}:8000/api/ir/signals");
       if (res.ok) {
         const data = await res.json();
         setSignals(Array.isArray(data) ? data : []);

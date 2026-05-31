@@ -9,8 +9,8 @@ export default function DbWifi() {
   const fetchData = async () => {
     try {
       const [resAps, resClients] = await Promise.all([
-        fetch("http://127.0.0.1:8000/api/wifi/access-points").then(r => r.ok ? r.json() : []),
-        fetch("http://127.0.0.1:8000/api/wifi/clients").then(r => r.ok ? r.json() : [])
+        fetch("http://${raspberryIp}:8000/api/wifi/access-points").then(r => r.ok ? r.json() : []),
+        fetch("http://${raspberryIp}:8000/api/wifi/clients").then(r => r.ok ? r.json() : [])
       ]);
       setAps(resAps);
       setClients(resClients);

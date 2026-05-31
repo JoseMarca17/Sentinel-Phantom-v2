@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
+const raspberryIp = window.location.hostname
 export default function SubScreenRfid({ lastAction }) {
   const [view, setView] = useState('menu');
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -40,7 +40,7 @@ export default function SubScreenRfid({ lastAction }) {
 
   const fetchSignals = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/rfid/history");
+      const res = await fetch("http://${raspberryIp}:8000/api/rfid/history");
       const data = await res.json();
       setSavedSignals(data);
       setC2Log(`[C2 DB_SYNC] Synchronized ${data.length} cards from SQLite`);
@@ -54,7 +54,7 @@ export default function SubScreenRfid({ lastAction }) {
     setExecutionStatus(cmd === "READ" ? "SCANNING FIELD..." : cmd === "DUMP" ? "CRACKING KEYS..." : "WRITING SECTOR 0...");
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/rfid/action", {
+      const res = await fetch("http://${raspberry}:8000/api/rfid/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...extraParams })
@@ -94,7 +94,7 @@ export default function SubScreenRfid({ lastAction }) {
 
   // 📡 PIPELINE WEBSOCKET GLOBAL BLINDADO CONTRA CONEXIONES FANTASMAS
   useEffect(() => {
-    const ws = new WebSocket("ws://127.0.0.1:8000/ws/control");
+    const ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
     
     ws.onopen = () => {
       setC2Log("[C2 LINK] Sockets synchrony engaged successfully.");

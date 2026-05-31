@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
+const raspberryIp = window.location.hostname
 export default function SubScreenIr({ lastAction }) {
   const [view, setView] = useState('menu');
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -26,7 +26,7 @@ export default function SubScreenIr({ lastAction }) {
 
   const fetchSignals = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/ir/signals");
+      const res = await fetch("http://${raspberryIp}:8000/api/ir/signals");
       const data = await res.json();
       setSavedSignals(data);
     } catch (err) {
@@ -40,7 +40,7 @@ export default function SubScreenIr({ lastAction }) {
     setExecutionStatus(cmd === "CAPTURE" ? "LISTENING GPIO 26..." : "TRANSMITTING...");
 
     try {
-      const res = await fetch("http://localhost:8000/api/ir/action", {
+      const res = await fetch('http://${raspberryIP}:8000/api/ir/action', {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...extraParams })

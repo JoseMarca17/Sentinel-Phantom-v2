@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
+const raspberryIp = window.location.hostname
 export default function WifiMitm({ functionIdx, lastAction, sendC2Action, accessPoints, clients, isInjecting, setIsInjecting, setStatusLog }) {
   const [listIdx, setListIdx] = useState(0);
   const [handshakesPool, setHandshakesPool] = useState([]);
@@ -44,7 +44,8 @@ export default function WifiMitm({ functionIdx, lastAction, sendC2Action, access
 
   useEffect(() => {
     if (currentId === "eapol_trap") {
-      fetch("http://127.0.0.1:8000/api/wifi/handshakes")
+      
+      fetch("http://${raspberryIp}:8000/api/wifi/handshakes")
         .then(r => r.json())
         .then(data => setHandshakesPool(data || []))
         .catch(() => {});

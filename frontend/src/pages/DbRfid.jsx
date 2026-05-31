@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Database, Clock, Fingerprint, Activity, Zap, Trash2 } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function DbRfid() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -8,7 +8,7 @@ export default function DbRfid() {
   // 📡 Sincronización con la Base de Datos SQLite
   const fetchRfidData = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/rfid/history");
+      const res = await fetch("http://${raspberryIp}:8000/api/rfid/history");
       if (res.ok) {
         const data = await res.json();
         setLogs(Array.isArray(data) ? data : []);

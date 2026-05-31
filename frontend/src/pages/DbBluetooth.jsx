@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Bluetooth, Database, ShieldAlert, Cpu, Layers, Radio } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function DbBle() {
   const [devices, setDevices] = useState([]);
   const [trackers, setTrackers] = useState([]);
@@ -9,8 +9,8 @@ export default function DbBle() {
   const fetchData = async () => {
     try {
       const [resDevices, resTrackers] = await Promise.all([
-        fetch("http://127.0.0.1:8000/api/ble/devices").then(r => r.ok ? r.json() : []),
-        fetch("http://127.0.0.1:8000/api/ble/trackers").then(r => r.ok ? r.json() : [])
+        fetch("http://${raspberryIp}:8000/api/ble/devices").then(r => r.ok ? r.json() : []),
+        fetch("http://${raspberryIp}:8000/api/ble/trackers").then(r => r.ok ? r.json() : [])
       ]);
       setDevices(Array.isArray(resDevices) ? resDevices : []);
       setTrackers(Array.isArray(resTrackers) ? resTrackers : []);

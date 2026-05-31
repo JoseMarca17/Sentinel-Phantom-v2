@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
+const raspberryIp = window.location.hostname
 export default function SubScreenNrf({ lastAction }) {
   const [view, setView] = useState('menu');
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -42,7 +42,7 @@ export default function SubScreenNrf({ lastAction }) {
 
   const sendPingRequest = async (cmd, extraParams = {}) => {
     try {
-      await fetch("http://127.0.0.1:8000/api/nrf24/action", {
+      await fetch("http://${raspberryIp}:8000/api/nrf24/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...extraParams })
@@ -79,7 +79,7 @@ export default function SubScreenNrf({ lastAction }) {
 
   // 📡 RECEPTOR CENTRAL DE WEBSOCKETS (PINTA EL ESPECTRO Y CAPTURA HID)
   useEffect(() => {
-    const ws = new WebSocket("ws://127.0.0.1:8000/ws/control");
+    const ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
     
     ws.onopen = () => setC2Log("[C2 LINK] Sockets synchrony active.");
     

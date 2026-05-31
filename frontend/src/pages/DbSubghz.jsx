@@ -7,7 +7,7 @@ export default function DbSubghz() {
 
   const fetchSubghz = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/subghz/history");
+      const res = await fetch("http://${raspberryIp}:8000/api/subghz/history");
       if (res.ok) {
         const data = await res.json();
         setCaptures(Array.isArray(data) ? data : []);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Cpu, Database, Radio, ShieldAlert, Activity, Server, Users, RadioReceiver, Layers, Zap, Key, Bluetooth, Wifi } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function Dashboard() {
   const [hardwareState, setHardwareState] = useState({
     uart:    { status: 'CHECKING', desc: 'Esperando respuesta del ESP32...', val: 'PENDING' },
@@ -37,19 +37,19 @@ export default function Dashboard() {
       };
 
       await Promise.all([
-        safe("http://127.0.0.1:8000/api/wifi/access-points", "wifi_aps"),
-        safe("http://127.0.0.1:8000/api/wifi/clients",       "wifi_clients"),
-        safe("http://127.0.0.1:8000/api/wifi/handshakes",    "wifi_handshakes"),
-        safe("http://127.0.0.1:8000/api/ir/signals",         "ir_signals"),
-        safe("http://127.0.0.1:8000/api/rfid/history",       "rfid_cards"),
-        safe("http://127.0.0.1:8000/api/subghz/history",     "subghz_logs"),
-        safe("http://127.0.0.1:8000/api/ble/devices",        "ble_nodes"),
-        safe("http://127.0.0.1:8000/api/ble/trackers",       "ble_trackers"),
+        safe("http://${raspberryIp}:8000/api/wifi/access-points", "wifi_aps"),
+        safe("http://${raspberryIp}:8000/api/wifi/clients",       "wifi_clients"),
+        safe("http://${raspberryIp}:8000/api/wifi/handshakes",    "wifi_handshakes"),
+        safe("http://${raspberryIp}:8000/api/ir/signals",         "ir_signals"),
+        safe("http://${raspberryIp}:8000/api/rfid/history",       "rfid_cards"),
+        safe("http://${raspberryIp}:8000/api/subghz/history",     "subghz_logs"),
+        safe("http://${raspberryIp}:8000/api/ble/devices",        "ble_nodes"),
+        safe("http://${raspberryIp}:8000/api/ble/trackers",       "ble_trackers"),
       ]);
 
       // Verificar antena leyendo la interfaz desde el backend
       try {
-        const r = await fetch("http://127.0.0.1:8000/");
+        const r = await fetch("http://${raspberryIp}:8000/");
         if (r.ok) {
           const d = await r.json();
           const iface = d.attack_iface || "wlp8s0f3u1";
@@ -75,7 +75,7 @@ export default function Dashboard() {
   useEffect(() => {
     let ws, timer;
     const connect = () => {
-      ws = new WebSocket("ws://127.0.0.1:8000/ws/control");
+      ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
 
       ws.onopen = () => {
         if (!uartChecked.current) {

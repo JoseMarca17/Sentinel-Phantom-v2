@@ -21,6 +21,8 @@ export default function SubScreenBle({ lastAction }) {
   const mountTimeRef     = useRef(Date.now());
   const viewRef          = useRef('menu');
 
+  const raspberryIp = window.location.hostname
+
   useEffect(() => { viewRef.current = view; }, [view]);
 
   const menuOptions = [
@@ -55,7 +57,7 @@ export default function SubScreenBle({ lastAction }) {
   useEffect(() => {
     let ws, timer;
     const connect = () => {
-      ws = new WebSocket("ws://127.0.0.1:8000/ws/control");
+      ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
       ws.onmessage = (e) => {
         try {
           const { module, data } = JSON.parse(e.data);
@@ -108,7 +110,7 @@ export default function SubScreenBle({ lastAction }) {
     const endpoint = view === 'anti_track' ? 'trackers' : 'devices';
     const fetch_db = async () => {
       try {
-        const r = await fetch(`http://127.0.0.1:8000/api/ble/${endpoint}`);
+        const r = await fetch(`http://${raspberryIp}:8000/api/ble/${endpoint}`);
         const data = await r.json();
         setDevices(data.slice(0, 8));
         if (view === 'anti_track') setTrackerCount(data.length);
