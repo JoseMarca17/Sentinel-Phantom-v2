@@ -1,17 +1,16 @@
 import time
 import sys
 import asyncio
-import threading
-import requests
-import websockets
 import json
 import board
 import busio
 import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
 import adafruit_ssd1306
+import aiohttp
+import websockets
 
-# 1. Ajustes del C2 Engine en localhost
+# 1. Configuración del Entorno C2
 API_URL = "http://127.0.0.1:8000/api"
 WS_URL = "ws://127.0.0.1:8000/ws/control"
 
@@ -30,14 +29,14 @@ try:
     i2c = busio.I2C(board.SCL, board.SDA)
     oled = adafruit_ssd1306.SSD1306_I2C(WIDTH, HEIGHT, i2c)
 except Exception as e:
-    print(f"[-] Fallo de enlace I2C en OLED: {e}")
+    print(f"[-] Error I2C OLED: {e}")
     sys.exit(1)
 
 GPIO.setmode(GPIO.BCM)
 for pin in BUTTONS.values():
     GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# Variables de Estado de la Interfaz
+# Variables de Estado de la UI
 menu_items = [
     "1. WI-FI SNIFFER", 
     "2. NRF24 SPECTRUM", 
@@ -54,7 +53,6 @@ nrf_channels = [0] * 16
 
 font = ImageFont.load_default()
 
-# ─── COMPONENTE GRÁFICO (RENDERS) ───
 def render_ui():
     image = Image.new("1", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(image)
@@ -120,69 +118,71 @@ def render_ui():
     oled.image(image)
     oled.show()
 
-# ─── LLAMADAS DE CONTROL (DISPARADORES) ───
-def trigger_action(option):
+# ─── DISPAROS HTTP COMPLETAMENTE ASÍNCRONOS (FIRE AND FORGET) ───
+async def async_trigger_action(option):
     global current_view, status_text, wifi_networks, nrf_channels
     
-    try:
-        if option == 0:
-            current_view = "LIVE_WIFI"
-            wifi_networks = []
-            render_ui()
-            requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=2)
-        elif option == 1:
-            current_view = "LIVE_NRF24"
-            nrf_channels = [0] * 16
-            render_ui()
-            requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=2)
-        elif option == 2:
-            current_view = "EXECUTING"
-            status_text = "Reading RFID..."
-            render_ui()
-            requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=2)
-        elif option == 3:
-            current_view = "EXECUTING"
-            status_text = "IR Receiver Armed..."
-            render_ui()
-            requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=2)
-        elif option == 4:
-            current_view = "EXECUTING"
-            status_text = "BLE Spammer Active"
-            render_ui()
-            requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=2)
-    except Exception:
+    if option == 0:
+        current_view = "LIVE_WIFI"
+        wifi_networks = []
+    elif option == 1:
+        current_view = "LIVE_NRF24"
+        nrf_channels = [0] * 16
+    else:
         current_view = "EXECUTING"
-        status_text = "Link Error to C2"
+        status_text = "Sending command..."
+        
     render_ui()
 
-# ─── RECOLECTOR ANATÓMICO ADAPTADO A TU APP.PY ───
+    # Evita congelar el hilo: crea una sesión efímera que no detiene el ciclo de la pantalla
+    async with aiohttp.ClientSession() as session:
+        try:
+            if option == 0:
+                await session.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=0.2)
+            elif option == 1:
+                await session.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=0.2)
+            elif option == 2:
+                await session.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=0.2)
+            elif option == 3:
+                await session.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=0.2)
+            elif option == 4:
+                await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=0.2)
+        except Exception:
+            pass  # Los timeouts intencionales se descartan de inmediato
+
+async def async_stop_action():
+    async with aiohttp.ClientSession() as session:
+        try:
+            if current_idx == 0:
+                await session.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=0.5)
+            elif current_idx == 1:
+                await session.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=0.5)
+            elif current_idx == 4:
+                await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=0.5)
+        except Exception:
+            pass
+
+# ─── RECOLECTOR ASÍNCRONO PARALELO DE WEBSOCKETS ───
 async def websocket_listener():
     global current_view, wifi_networks, nrf_channels, status_text
     while True:
         try:
             async with websockets.connect(WS_URL) as ws:
-                print("[+] Pipeline WS sincronizado con app.py")
+                print("[+] Pipeline WebSocket sincronizado libre de lag.")
                 while True:
                     msg = await ws.recv()
-                    
-                    try:
-                        payload = json.loads(msg)
-                    except json.JSONDecodeError:
-                        continue
+                    payload = json.loads(msg)
                     
                     if not isinstance(payload, dict):
                         continue
                     
-                    # 🛠️ DETECCIÓN ANATÓMICA SIN DEPENDER DE LA ETIQUETA "MODULE"
-                    # Caso 1: Estructura cruda de NRF24 transmitida por tu serial_bridge
+                    # Intercepción directa analizando la anatomía del JSON
                     if "channels" in payload:
                         raw_channels = payload.get("channels")
                         if isinstance(raw_channels, list) and current_view == "LIVE_NRF24":
                             for idx in range(min(16, len(raw_channels))):
                                 nrf_channels[idx] = float(raw_channels[idx])
                             render_ui()
-                            
-                    # Caso 2: Payload encapsulado o transmitido desde submódulos
                     else:
                         module = str(payload.get("module", "")).upper()
                         data = payload.get("data", payload)
@@ -194,7 +194,6 @@ async def websocket_listener():
                                     nrf_channels[idx] = float(raw_channels[idx])
                                 render_ui()
                                 
-                        # Captura e inyección para el Sniffer Wi-Fi
                         elif current_view == "LIVE_WIFI" or module == "WIFI":
                             ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
                             rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
@@ -203,8 +202,6 @@ async def websocket_listener():
                                 wifi_networks.append((ssid, int(rssi)))
                                 wifi_networks.sort(key=lambda x: x[1], reverse=True)
                                 render_ui()
-                                
-                        # Capturas instantáneas de RFID e IR
                         else:
                             uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
                             proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
@@ -217,56 +214,54 @@ async def websocket_listener():
                                 status_text = f"IR: {proto}\n0x{code}"
                                 current_view = "LIVE_DATA"
                                 render_ui()
-                                
         except Exception:
             await asyncio.sleep(1)
 
-def start_ws_thread():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(websocket_listener())
-
-# ─── LAZO DEL D-PAD ───
-def main_hardware_loop():
+# ─── BUCLE PRINCIPAL DE LOS BOTONES (ASÍNCRONO COMPLETO) ───
+async def main_hardware_loop():
     global current_idx, current_view
     render_ui()
+    
     while True:
         if current_view == "BANNER":
             if not GPIO.input(BUTTONS["OK"]):
                 current_view = "MENU"
                 render_ui()
-                time.sleep(0.3)
+                await asyncio.sleep(0.3)
                 
         elif current_view == "MENU":
             if not GPIO.input(BUTTONS["DOWN"]):
                 current_idx = (current_idx + 1) % len(menu_items)
                 render_ui()
-                time.sleep(0.2)
+                await asyncio.sleep(0.2)
             elif not GPIO.input(BUTTONS["UP"]):
                 current_idx = (current_idx - 1) % len(menu_items)
                 render_ui()
-                time.sleep(0.2)
+                await asyncio.sleep(0.2)
             elif not GPIO.input(BUTTONS["OK"]):
-                trigger_action(current_idx)
-                time.sleep(0.3)
+                # Disparar la petición HTTP en una corrutina paralela sin bloquear
+                asyncio.create_task(async_trigger_action(current_idx))
+                await asyncio.sleep(0.3)
                 
         elif current_view in ["EXECUTING", "LIVE_WIFI", "LIVE_NRF24", "LIVE_DATA"]:
             if not GPIO.input(BUTTONS["LEFT"]):
-                try:
-                    if current_idx == 0: requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=1)
-                    elif current_idx == 1: requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=1)
-                    elif current_idx == 4: requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=1)
-                except: pass
+                asyncio.create_task(async_stop_action())
                 current_view = "MENU"
                 render_ui()
-                time.sleep(0.3)
-        time.sleep(0.05)
+                await asyncio.sleep(0.3)
+                
+        await asyncio.sleep(0.05) # Cede el control para que el WebSocket respire
+
+async def main():
+    # Lanzar ambas tareas concurrentemente bajo el mismo lazo de eventos nativo
+    await asyncio.gather(
+        websocket_listener(),
+        main_hardware_loop()
+    )
 
 if __name__ == "__main__":
-    ws_thread = threading.Thread(target=start_ws_thread, daemon=True)
-    ws_thread.start()
     try:
-        main_hardware_loop()
+        asyncio.run(main())
     except KeyboardInterrupt:
         image = Image.new("1", (WIDTH, HEIGHT))
         oled.image(image)
