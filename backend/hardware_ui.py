@@ -11,7 +11,7 @@ import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
 import adafruit_ssd1306
 
-# 1. Configuración de Entorno e Infraestructura C2
+# 1. Ajustes del C2 Engine en localhost
 API_URL = "http://127.0.0.1:8000/api"
 WS_URL = "ws://127.0.0.1:8000/ws/control"
 
@@ -21,23 +21,23 @@ HEIGHT = 64
 BUTTONS = {
     "UP": 17,
     "DOWN": 27,
-    "LEFT": 22,   # Funciona como VOLVER / CANCELAR
-    "RIGHT": 23,  # Control secundario
-    "OK": 24      # AVANZAR / SELECCIONAR
+    "LEFT": 22,   # VOLVER
+    "RIGHT": 23,
+    "OK": 24      # DISPARAR
 }
 
 try:
     i2c = busio.I2C(board.SCL, board.SDA)
     oled = adafruit_ssd1306.SSD1306_I2C(WIDTH, HEIGHT, i2c)
 except Exception as e:
-    print(f"[-] Error I2C OLED: {e}")
+    print(f"[-] Fallo de enlace I2C en OLED: {e}")
     sys.exit(1)
 
 GPIO.setmode(GPIO.BCM)
 for pin in BUTTONS.values():
     GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# 2. Variables de Estado de la Máquina de Estados (UI)
+# Variables de Estado de la Interfaz
 menu_items = [
     "1. WI-FI SNIFFER", 
     "2. NRF24 SPECTRUM", 
@@ -46,22 +46,20 @@ menu_items = [
     "5. BLE FLOOD"
 ]
 current_idx = 0
-current_view = "BANNER"  # Estados: BANNER, MENU, EXECUTING, LIVE_WIFI, LIVE_NRF24, LIVE_DATA
+current_view = "BANNER"
 status_text = ""
 
-# Estructuras de almacenamiento para datos en vivo (Muestreo rápido)
-wifi_networks = []  # Almacena tuplas: (SSID, RSSI)
-nrf_channels = [0] * 16  # Mapeo simplificado de canales del barrido RSSI
+wifi_networks = []  
+nrf_channels = [0] * 16  
 
 font = ImageFont.load_default()
 
-# ─── MÓDULO VISUAL: RENDERIZADOR ESPECÍFICO DE ESTADOS ───
+# ─── COMPONENTE GRÁFICO (RENDERS) ───
 def render_ui():
     image = Image.new("1", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(image)
     
     if current_view == "BANNER":
-        # Pantalla de Bienvenida
         draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((12, 12), "SENTINEL PHANTOM", font=font, fill=255)
         draw.text((24, 26), "[ CORE V2.0 ]", font=font, fill=255)
@@ -69,10 +67,8 @@ def render_ui():
         draw.text((18, 46), "PRESS OK TO BOOT", font=font, fill=255)
 
     elif current_view == "MENU":
-        # Menú Principal
         draw.text((0, 0), "SYS OPTIONS:", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
         start = max(0, current_idx - 3)
         y = 14
         for i in range(start, min(start + 4, len(menu_items))):
@@ -87,10 +83,8 @@ def render_ui():
         draw.text((4, 52), "[LEFT] TO ABORT", font=font, fill=255)
 
     elif current_view == "LIVE_WIFI":
-        # Interfaz Avanzada Wi-Fi
         draw.text((0, 0), "RF MONITOR: WI-FI", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
         if not wifi_networks:
             draw.text((10, 30), "Awaiting targets...", font=font, fill=255)
         else:
@@ -104,10 +98,8 @@ def render_ui():
                 y += 12
 
     elif current_view == "LIVE_NRF24":
-        # Interfaz Gráfica Avanzada NRF24 (Analizador de Espectro)
         draw.text((0, 0), "NRF24 SPECTRUM BAR", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
         col_w = 6
         gap = 2
         for i, val in enumerate(nrf_channels):
@@ -115,7 +107,6 @@ def render_ui():
             bar_h = min(40, int(val * 4)) 
             y = 52 - bar_h
             draw.rectangle((x, y, x + col_w, 52), outline=255, fill=255)
-            
         draw.text((0, 54), "2.4G Hz CHANNELS (0-15)", font=font, fill=255)
 
     elif current_view == "LIVE_DATA":
@@ -129,52 +120,48 @@ def render_ui():
     oled.image(image)
     oled.show()
 
-# ─── INYECCIÓN ASÍNCRONA CORREGIDA (NO-BLOQUEANTE) ───
+# ─── LLAMADAS DE CONTROL (DISPARADORES) ───
 def trigger_action(option):
     global current_view, status_text, wifi_networks, nrf_channels
     
-    # Configurar la vista local antes de lanzar la petición de red
-    if option == 0:
-        current_view = "LIVE_WIFI"
-        wifi_networks = []
-    elif option == 1:
-        current_view = "LIVE_NRF24"
-        nrf_channels = [0] * 16
-    else:
+    try:
+        if option == 0:
+            current_view = "LIVE_WIFI"
+            wifi_networks = []
+            render_ui()
+            requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=2)
+        elif option == 1:
+            current_view = "LIVE_NRF24"
+            nrf_channels = [0] * 16
+            render_ui()
+            requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=2)
+        elif option == 2:
+            current_view = "EXECUTING"
+            status_text = "Reading RFID..."
+            render_ui()
+            requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=2)
+        elif option == 3:
+            current_view = "EXECUTING"
+            status_text = "IR Receiver Armed..."
+            render_ui()
+            requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=2)
+        elif option == 4:
+            current_view = "EXECUTING"
+            status_text = "BLE Spammer Active"
+            render_ui()
+            requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=2)
+    except Exception:
         current_view = "EXECUTING"
-        status_text = "Launching cmd..."
-        
+        status_text = "Link Error to C2"
     render_ui()
-    
-    # Lanzar peticiones en un hilo separado o con timeout ultracorto 
-    # para que la UI no se quede esperando la respuesta síncrona de FastAPI/UART
-    def async_post():
-        try:
-            if option == 0:
-                requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=0.1)
-            elif option == 1:
-                requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=0.1)
-            elif option == 2:
-                requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=0.1)
-            elif option == 3:
-                requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=0.1)
-            elif option == 4:
-                requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=0.1)
-        except requests.exceptions.Timeout:
-            # Capturamos el timeout intencional para continuar de inmediato
-            pass
-        except Exception:
-            pass
 
-    threading.Thread(target=async_post, daemon=True).start()
-
-# ─── RECOLECTOR ASÍNCRONO: WEBSOCKETS (RECIBE EN TIEMPO REAL) ───
+# ─── RECOLECTOR ANATÓMICO ADAPTADO A TU APP.PY ───
 async def websocket_listener():
     global current_view, wifi_networks, nrf_channels, status_text
     while True:
         try:
             async with websockets.connect(WS_URL) as ws:
-                print("[+] Pipeline WS acoplado a la OLED.")
+                print("[+] Pipeline WS sincronizado con app.py")
                 while True:
                     msg = await ws.recv()
                     
@@ -186,49 +173,51 @@ async def websocket_listener():
                     if not isinstance(payload, dict):
                         continue
                     
-                    module = str(payload.get("module", payload.get("mod", ""))).upper()
-                    data = payload.get("data", payload)
-                    
-                    # Interceptar espectro NRF24 en caliente
-                    if current_view == "LIVE_NRF24" or module == "NRF24":
-                        raw_channels = None
-                        if isinstance(data, dict):
-                            raw_channels = data.get("channels") or data.get("data")
-                        elif isinstance(data, list):
-                            raw_channels = data
-                        
-                        if not raw_channels and isinstance(payload, dict):
-                            raw_channels = payload.get("channels") or payload.get("nrf_channels")
-
-                        if isinstance(raw_channels, list):
+                    # 🛠️ DETECCIÓN ANATÓMICA SIN DEPENDER DE LA ETIQUETA "MODULE"
+                    # Caso 1: Estructura cruda de NRF24 transmitida por tu serial_bridge
+                    if "channels" in payload:
+                        raw_channels = payload.get("channels")
+                        if isinstance(raw_channels, list) and current_view == "LIVE_NRF24":
                             for idx in range(min(16, len(raw_channels))):
-                                try:
-                                    nrf_channels[idx] = float(raw_channels[idx])
-                                except (ValueError, TypeError):
-                                    nrf_channels[idx] = 0
+                                nrf_channels[idx] = float(raw_channels[idx])
                             render_ui()
                             
-                    elif current_view == "LIVE_WIFI":
-                        ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
-                        rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
-                        if ssid and rssi:
-                            wifi_networks = [n for n in wifi_networks if n[0] != ssid]
-                            wifi_networks.append((ssid, int(rssi)))
-                            wifi_networks.sort(key=lambda x: x[1], reverse=True)
-                            render_ui()
+                    # Caso 2: Payload encapsulado o transmitido desde submódulos
                     else:
-                        uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
-                        proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
-                        if uid:
-                            status_text = f"UID: {uid}"
-                            current_view = "LIVE_DATA"
-                            render_ui()
-                        elif proto:
-                            code = data.get("code") if isinstance(data, dict) else payload.get("code")
-                            status_text = f"IR: {proto}\n0x{code}"
-                            current_view = "LIVE_DATA"
-                            render_ui()
-                            
+                        module = str(payload.get("module", "")).upper()
+                        data = payload.get("data", payload)
+                        
+                        if isinstance(data, dict) and "channels" in data:
+                            raw_channels = data.get("channels")
+                            if isinstance(raw_channels, list) and current_view == "LIVE_NRF24":
+                                for idx in range(min(16, len(raw_channels))):
+                                    nrf_channels[idx] = float(raw_channels[idx])
+                                render_ui()
+                                
+                        # Captura e inyección para el Sniffer Wi-Fi
+                        elif current_view == "LIVE_WIFI" or module == "WIFI":
+                            ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
+                            rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
+                            if ssid and rssi:
+                                wifi_networks = [n for n in wifi_networks if n[0] != ssid]
+                                wifi_networks.append((ssid, int(rssi)))
+                                wifi_networks.sort(key=lambda x: x[1], reverse=True)
+                                render_ui()
+                                
+                        # Capturas instantáneas de RFID e IR
+                        else:
+                            uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
+                            proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
+                            if uid:
+                                status_text = f"UID: {uid}"
+                                current_view = "LIVE_DATA"
+                                render_ui()
+                            elif proto:
+                                code = data.get("code") if isinstance(data, dict) else payload.get("code")
+                                status_text = f"IR: {proto}\n0x{code}"
+                                current_view = "LIVE_DATA"
+                                render_ui()
+                                
         except Exception:
             await asyncio.sleep(1)
 
@@ -237,10 +226,9 @@ def start_ws_thread():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(websocket_listener())
 
-# ─── LAZO DE CONTROL PRIMARIO DE LOS PULSADORES ───
+# ─── LAZO DEL D-PAD ───
 def main_hardware_loop():
     global current_idx, current_view
-    
     render_ui()
     while True:
         if current_view == "BANNER":
@@ -264,29 +252,19 @@ def main_hardware_loop():
                 
         elif current_view in ["EXECUTING", "LIVE_WIFI", "LIVE_NRF24", "LIVE_DATA"]:
             if not GPIO.input(BUTTONS["LEFT"]):
-                # Mandar comando de parada de forma asíncrona también
-                def stop_action():
-                    try:
-                        if current_idx == 0:
-                            requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=0.5)
-                        elif current_idx == 1:
-                            requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_SCAN"}, timeout=0.5)
-                        elif current_idx == 4:
-                            requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=0.5)
-                    except:
-                        pass
-                
-                threading.Thread(target=stop_action, daemon=True).start()
+                try:
+                    if current_idx == 0: requests.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=1)
+                    elif current_idx == 1: requests.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=1)
+                    elif current_idx == 4: requests.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=1)
+                except: pass
                 current_view = "MENU"
                 render_ui()
                 time.sleep(0.3)
-                
         time.sleep(0.05)
 
 if __name__ == "__main__":
     ws_thread = threading.Thread(target=start_ws_thread, daemon=True)
     ws_thread.start()
-    
     try:
         main_hardware_loop()
     except KeyboardInterrupt:
