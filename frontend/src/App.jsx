@@ -20,7 +20,7 @@ export default function App() {
     const savedRole = localStorage.getItem('phantom_role');
     if (token) {
       // Verificar que el token sigue siendo válido
-      fetch('http://${raspberryIp}:8000/api/auth/me', {
+      fetch(`http://${raspberryIp}:8000/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(r => {

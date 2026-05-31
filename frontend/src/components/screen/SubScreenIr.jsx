@@ -26,7 +26,7 @@ export default function SubScreenIr({ lastAction }) {
 
   const fetchSignals = async () => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/ir/signals");
+      const res = await fetch(`http://${raspberryIp}:8000/api/ir/signals`);
       const data = await res.json();
       setSavedSignals(data);
     } catch (err) {
@@ -40,7 +40,7 @@ export default function SubScreenIr({ lastAction }) {
     setExecutionStatus(cmd === "CAPTURE" ? "LISTENING GPIO 26..." : "TRANSMITTING...");
 
     try {
-      const res = await fetch('http://${raspberryIP}:8000/api/ir/action', {
+      const res = await fetch(`http://${raspberryIp}:8000/api/ir/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...extraParams })
@@ -75,7 +75,7 @@ export default function SubScreenIr({ lastAction }) {
 
   // 📡 WEB SOCKET PIPELINE CRÍTICO
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8000/ws/control");
+    const ws = new WebSocket(`ws://${raspberryIp}:8000/ws/control`);
     
     ws.onmessage = (event) => {
       try {

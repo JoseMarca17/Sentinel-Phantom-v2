@@ -45,7 +45,7 @@ export default function WifiMitm({ functionIdx, lastAction, sendC2Action, access
   useEffect(() => {
     if (currentId === "eapol_trap") {
       
-      fetch("http://${raspberryIp}:8000/api/wifi/handshakes")
+      fetch(`http://${raspberryIp}:8000/api/wifi/handshakes`)
         .then(r => r.json())
         .then(data => setHandshakesPool(data || []))
         .catch(() => {});

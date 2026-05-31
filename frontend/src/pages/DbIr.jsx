@@ -7,7 +7,7 @@ export default function DbIr() {
 
   const fetchIr = async () => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/ir/signals");
+      const res = await fetch(`http://${raspberryIp}:8000/api/ir/signals`);
       if (res.ok) {
         const data = await res.json();
         setSignals(Array.isArray(data) ? data : []);

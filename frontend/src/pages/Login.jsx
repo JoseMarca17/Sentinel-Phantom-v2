@@ -64,7 +64,7 @@ export default function Login({ onLogin }) {
       form.append('username', username);
       form.append('password', password);
       const raspberryIp = window.location.hostname
-      const res = await fetch('http://${raspberryIp}:8000/api/auth/login', {
+      const res = await fetch(`http://${raspberryIp}:8000/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form.toString()

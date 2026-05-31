@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Wifi, Database, ShieldAlert, Cpu, Layers, Trash2, Zap } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function DbWifi() {
   const [aps, setAps] = useState([]);
   const [clients, setClients] = useState([]);
@@ -9,8 +9,8 @@ export default function DbWifi() {
   const fetchData = async () => {
     try {
       const [resAps, resClients] = await Promise.all([
-        fetch("http://${raspberryIp}:8000/api/wifi/access-points").then(r => r.ok ? r.json() : []),
-        fetch("http://${raspberryIp}:8000/api/wifi/clients").then(r => r.ok ? r.json() : [])
+        fetch(`http://${raspberryIp}:8000/api/wifi/access-points`).then(r => r.ok ? r.json() : []),
+        fetch(`http://${raspberryIp}:8000/api/wifi/clients`).then(r => r.ok ? r.json() : [])
       ]);
       setAps(resAps);
       setClients(resClients);

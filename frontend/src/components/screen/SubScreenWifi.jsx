@@ -65,7 +65,7 @@ export default function SubScreenWifi({ lastAction }) {
 
   const sendC2Action = async (cmd, params = {}) => {
     try {
-      const response = await fetch("http://${raspberryIp}:8000/api/wifi/action", {
+      const response = await fetch(`http://${raspberryIp}:8000/api/wifi/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...params })
@@ -83,7 +83,7 @@ export default function SubScreenWifi({ lastAction }) {
 
     const connect = () => {
       setWsStatus("CONNECTING");
-      ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
+      ws = new WebSocket(`ws://${raspberryIp}:8000/ws/control`);
 
       ws.onopen = () => setWsStatus("ONLINE");
 

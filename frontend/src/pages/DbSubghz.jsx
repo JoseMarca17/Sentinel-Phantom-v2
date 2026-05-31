@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { RadioReceiver, Database, Clock, Activity, Zap, Trash2 } from 'lucide-react';
-
+const raspberryIp = window.location.hostname;
 export default function DbSubghz() {
   const [captures, setCaptures] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchSubghz = async () => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/subghz/history");
+      const res = await fetch(`http://${raspberryIp}:8000/api/subghz/history`);
       if (res.ok) {
         const data = await res.json();
         setCaptures(Array.isArray(data) ? data : []);

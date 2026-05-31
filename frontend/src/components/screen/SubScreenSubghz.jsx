@@ -38,7 +38,7 @@ export default function SubScreenSubghz({ lastAction }) {
   // 🗄️ CONSULTA SÍNCRONA A TU API DE HISTORIAL (SQLAlchemy)
   const fetchSavedClones = async () => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/subghz/history");
+      const res = await fetch(`http://${raspberryIp}:8000/api/subghz/history`);
       const data = await res.json();
       setSavedSignals(data);
       setC2Log(`[C2 DB] Sincronizados ${data.length} clones desde SQLAlchemy.`);
@@ -54,7 +54,7 @@ export default function SubScreenSubghz({ lastAction }) {
       cmd === "CAPTURE" ? "LISTENING RAW..." : "INJECTING WAVE..."
     );
     try {
-      await fetch("http://${raspberryIp}:8000/api/subghz/action", {
+      await fetch(`http://${raspberryIp}:8000/api/subghz/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...extraParams })
@@ -74,7 +74,7 @@ export default function SubScreenSubghz({ lastAction }) {
 
   // 📡 RECEPTOR CENTRAL DE EVENTOS WEBSOCKET (CC1101)
   useEffect(() => {
-    const ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
+    const ws = new WebSocket(`ws://${raspberryIp}:8000/ws/control`);
     
     ws.onmessage = (event) => {
       try {

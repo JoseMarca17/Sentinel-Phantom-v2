@@ -42,7 +42,7 @@ export default function SubScreenBle({ lastAction }) {
 
   const sendC2 = async (cmd, params = {}) => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/ble/action", {
+      const res = await fetch(`http://${raspberryIp}:8000/api/ble/action`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cmd, ...params })
@@ -57,7 +57,7 @@ export default function SubScreenBle({ lastAction }) {
   useEffect(() => {
     let ws, timer;
     const connect = () => {
-      ws = new WebSocket("ws://${raspberryIp}:8000/ws/control");
+      ws = new WebSocket(`ws://${raspberryIp}:8000/ws/control`);
       ws.onmessage = (e) => {
         try {
           const { module, data } = JSON.parse(e.data);

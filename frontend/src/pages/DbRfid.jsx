@@ -8,7 +8,7 @@ export default function DbRfid() {
   // 📡 Sincronización con la Base de Datos SQLite
   const fetchRfidData = async () => {
     try {
-      const res = await fetch("http://${raspberryIp}:8000/api/rfid/history");
+      const res = await fetch(`http://${raspberryIp}:8000/api/rfid/history`);
       if (res.ok) {
         const data = await res.json();
         setLogs(Array.isArray(data) ? data : []);
