@@ -47,6 +47,7 @@ menu_items = [
 ]
 current_idx = 0
 current_view = "BANNER"  # Estados: BANNER, MENU, EXECUTING, LIVE_WIFI, LIVE_NRF24, LIVE_DATA
+status_text = ""
 
 # Estructuras de almacenamiento para datos en vivo (Muestreo rápido)
 wifi_networks = []  # Almacena tuplas: (SSID, RSSI)
@@ -60,18 +61,16 @@ def render_ui():
     draw = ImageDraw.Draw(image)
     
     if current_view == "BANNER":
-        # Pantalla de Bienvenida (Estilo Terminal Militar)
+        # Pantalla de Bienvenida
         draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((12, 12), "SENTINEL PHANTOM", font=font, fill=255)
         draw.text((24, 26), "[ CORE V2.0 ]", font=font, fill=255)
-        # CORREGIDO: Tupla doble obligatoria para Pillow ((x1, y1), (x2, y2))
         draw.line(((15, 40), (112, 40)), fill=255)
         draw.text((18, 46), "PRESS OK TO BOOT", font=font, fill=255)
 
     elif current_view == "MENU":
         # Menú Principal
         draw.text((0, 0), "SYS OPTIONS:", font=font, fill=255)
-        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
         # Mostrar opciones con scroll adaptativo básico
@@ -91,17 +90,15 @@ def render_ui():
     elif current_view == "LIVE_WIFI":
         # Interfaz Avanzada Wi-Fi
         draw.text((0, 0), "RF MONITOR: WI-FI", font=font, fill=255)
-        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
         if not wifi_networks:
             draw.text((10, 30), "Awaiting targets...", font=font, fill=255)
         else:
             y = 14
-            for net in wifi_networks[:4]: # Muestra los 4 mejores APs detectados
+            for net in wifi_networks[:4]:
                 ssid, rssi = net
-                # Dibujar barra de intensidad gráfica
-                bar_w = max(2, int((rssi + 100) * 0.4)) # Normalización de señal
+                bar_w = max(2, int((rssi + 100) * 0.4))
                 draw.text((0, y), f"{ssid[:10]}", font=font, fill=255)
                 draw.rectangle((70, y+2, 70+bar_w, y+8), outline=255, fill=255)
                 draw.text((112, y), f"{rssi}", font=font, fill=255)
@@ -110,15 +107,12 @@ def render_ui():
     elif current_view == "LIVE_NRF24":
         # Interfaz Gráfica Avanzada NRF24 (Analizador de Espectro)
         draw.text((0, 0), "NRF24 SPECTRUM BAR", font=font, fill=255)
-        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         
-        # Dibujar 16 columnas para representar los canales de barrido de frecuencia
         col_w = 6
         gap = 2
         for i, val in enumerate(nrf_channels):
             x = 2 + (i * (col_w + gap))
-            # Calcular altura de la barra según la saturación de ruido recibida
             bar_h = min(40, int(val * 4)) 
             y = 52 - bar_h
             draw.rectangle((x, y, x + col_w, 52), outline=255, fill=255)
@@ -127,7 +121,6 @@ def render_ui():
 
     elif current_view == "LIVE_DATA":
         draw.text((0, 0), "DATA CAPTURED", font=font, fill=255)
-        # CORREGIDO: Tupla doble obligatoria ((x1, y1), (x2, y2))
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         draw.text((0, 24), status_text[:21], font=font, fill=255)
         if len(status_text) > 21:
@@ -142,27 +135,27 @@ def trigger_action(option):
     global current_view, status_text, wifi_networks, nrf_channels
     
     try:
-        if option == 0:  # WI-FI SNIFFER (Especial)
+        if option == 0:
             current_view = "LIVE_WIFI"
             wifi_networks = []
             render_ui()
             requests.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=2)
-        elif option == 1:  # NRF24 SPECTRUM (Especial)
+        elif option == 1:
             current_view = "LIVE_NRF24"
             nrf_channels = [0] * 16
             render_ui()
             requests.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=2)
-        elif option == 2:  # SCAN RFID (Ejecutable simple)
+        elif option == 2:
             current_view = "EXECUTING"
             status_text = "Reading RFID..."
             render_ui()
             requests.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=2)
-        elif option == 3:  # CAPTURE IR (Ejecutable simple)
+        elif option == 3:
             current_view = "EXECUTING"
             status_text = "IR Receiver Armed..."
             render_ui()
             requests.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=2)
-        elif option == 4:  # BLE FLOOD (Ejecutable simple)
+        elif option == 4:
             current_view = "EXECUTING"
             status_text = "BLE Spammer Active"
             render_ui()
@@ -172,7 +165,7 @@ def trigger_action(option):
         status_text = "Link Error to C2"
     render_ui()
 
-# ─── RECOLECTOR ASÍNCRONO: WEBSOCKETS (MONITOREO EN VIVO) ───
+# ─── RECOLECTOR ASÍNCRONO: WEBSOCKETS (TOLERANTE) ───
 async def websocket_listener():
     global current_view, wifi_networks, nrf_channels, status_text
     while True:
@@ -181,47 +174,64 @@ async def websocket_listener():
                 print("[+] Pipeline WS acoplado a la OLED.")
                 while True:
                     msg = await ws.recv()
-                    payload = json.loads(msg)
+                    
+                    try:
+                        payload = json.loads(msg)
+                    except json.JSONDecodeError:
+                        continue
                     
                     if not isinstance(payload, dict):
                         continue
-                        
-                    module = payload.get("module", "").upper()
-                    data = payload.get("data", {})
                     
-                    # 1. Captura e Inyección para Wi-Fi Sniffer en Vivo
-                    if current_view == "LIVE_WIFI":
-                        ssid = data.get("ssid") or payload.get("ssid")
-                        rssi = data.get("rssi") or payload.get("rssi")
+                    # Normalización del módulo y los datos
+                    module = str(payload.get("module", payload.get("mod", ""))).upper()
+                    data = payload.get("data", payload)
+                    
+                    # 1. Filtro dinámico para NRF24 (Soporta múltiples variantes de JSON)
+                    if current_view == "LIVE_NRF24" or module == "NRF24":
+                        raw_channels = None
+                        if isinstance(data, dict):
+                            raw_channels = data.get("channels") or data.get("data")
+                        elif isinstance(data, list):
+                            raw_channels = data
+                        
+                        if not raw_channels and isinstance(payload, dict):
+                            raw_channels = payload.get("channels") or payload.get("nrf_channels")
+
+                        if isinstance(raw_channels, list):
+                            for idx in range(min(16, len(raw_channels))):
+                                try:
+                                    nrf_channels[idx] = float(raw_channels[idx])
+                                except (ValueError, TypeError):
+                                    nrf_channels[idx] = 0
+                            render_ui()
+                            
+                    # 2. Filtro para Wi-Fi Sniffer
+                    elif current_view == "LIVE_WIFI":
+                        ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
+                        rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
                         if ssid and rssi:
                             wifi_networks = [n for n in wifi_networks if n[0] != ssid]
                             wifi_networks.append((ssid, int(rssi)))
                             wifi_networks.sort(key=lambda x: x[1], reverse=True)
                             render_ui()
                             
-                    # 2. Captura e Inyección para el Espectro NRF24
-                    elif current_view == "LIVE_NRF24" and module == "NRF24":
-                        raw_channels = data.get("channels") or payload.get("channels")
-                        if isinstance(raw_channels, list):
-                            for idx in range(min(16, len(raw_channels))):
-                                nrf_channels[idx] = raw_channels[idx]
-                            render_ui()
-                            
-                    # 3. Interrupciones globales de Capturas Simples (RFID, IR)
+                    # 3. Datos estáticos de Capturas (RFID, IR)
                     else:
-                        uid = data.get("uid") or payload.get("uid")
-                        proto = data.get("protocol") or payload.get("protocol")
+                        uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
+                        proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
                         if uid:
                             status_text = f"UID: {uid}"
                             current_view = "LIVE_DATA"
                             render_ui()
                         elif proto:
-                            code = data.get("code") or payload.get("code")
+                            code = data.get("code") if isinstance(data, dict) else payload.get("code")
                             status_text = f"IR: {proto}\n0x{code}"
                             current_view = "LIVE_DATA"
                             render_ui()
                             
-        except Exception:
+        except Exception as e:
+            print(f"[-] Caída temporal de WebSocket UI: {e}")
             await asyncio.sleep(2)
 
 def start_ws_thread():
@@ -235,14 +245,12 @@ def main_hardware_loop():
     
     render_ui()
     while True:
-        # 1. Control en Estado BANNER
         if current_view == "BANNER":
             if not GPIO.input(BUTTONS["OK"]):
                 current_view = "MENU"
                 render_ui()
                 time.sleep(0.3)
                 
-        # 2. Control en Estado MENÚ PRINCIPAL
         elif current_view == "MENU":
             if not GPIO.input(BUTTONS["DOWN"]):
                 current_idx = (current_idx + 1) % len(menu_items)
@@ -256,7 +264,6 @@ def main_hardware_loop():
                 trigger_action(current_idx)
                 time.sleep(0.3)
                 
-        # 3. Control en Vistas Interactivas o de Ejecución (Retorno)
         elif current_view in ["EXECUTING", "LIVE_WIFI", "LIVE_NRF24", "LIVE_DATA"]:
             if not GPIO.input(BUTTONS["LEFT"]):
                 try:
