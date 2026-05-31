@@ -20,8 +20,8 @@ HEIGHT = 64
 BUTTONS = {
     "UP": 17,
     "DOWN": 27,
-    "LEFT": 22,   # Funciona como VOLVER / CANCELAR
-    "RIGHT": 23,  # Control secundario
+    "LEFT": 22,   # VOLVER / CANCELAR
+    "RIGHT": 23,
     "OK": 24      # AVANZAR / SELECCIONAR
 }
 
@@ -45,22 +45,22 @@ menu_items = [
     "5. BLE FLOOD"
 ]
 current_idx = 0
-current_view = "BANNER"  # Estados: BANNER, MENU, EXECUTING, LIVE_WIFI, LIVE_NRF24, LIVE_DATA
+current_view = "BANNER"
 status_text = ""
 
-# Estructuras de amortiguación para datos de radiofrecuencia en tiempo real
-wifi_networks = []  # Almacena tuplas: (SSID, RSSI)
-nrf_channels = [0] * 16  # Mapeo de densidad espectral para las 16 columnas
+# Amortiguadores dinámicos globales
+wifi_networks = []  
+nrf_channels = [0] * 16  
 
 font = ImageFont.load_default()
 
-# ─── MÓDULO VISUAL: RENDERIZADOR SÍNCRONO DE BÚFER DE IMAGEN ───
-def render_ui():
+# ─── MOTOR DE RENDERIZADO CENTRALIZADO ───
+def draw_screen():
+    """Genera el búfer gráfico basándose estrictamente en el estado actual de las variables globales"""
     image = Image.new("1", (WIDTH, HEIGHT))
     draw = ImageDraw.Draw(image)
     
     if current_view == "BANNER":
-        # Pantalla de Bienvenida (Estilo Terminal Militar)
         draw.rectangle((0, 0, WIDTH-1, HEIGHT-1), outline=255, fill=0)
         draw.text((12, 12), "SENTINEL PHANTOM", font=font, fill=255)
         draw.text((24, 26), "[ CORE V2.0 ]", font=font, fill=255)
@@ -68,11 +68,8 @@ def render_ui():
         draw.text((18, 46), "PRESS OK TO BOOT", font=font, fill=255)
 
     elif current_view == "MENU":
-        # Menú Principal de Opciones Tácticas
         draw.text((0, 0), "SYS OPTIONS:", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
-        # Scroll adaptativo básico de 4 líneas
         start = max(0, current_idx - 3)
         y = 14
         for i in range(start, min(start + 4, len(menu_items))):
@@ -87,39 +84,33 @@ def render_ui():
         draw.text((4, 52), "[LEFT] TO ABORT", font=font, fill=255)
 
     elif current_view == "LIVE_WIFI":
-        # Analizador de Redes Wi-Fi en caliente
         draw.text((0, 0), "RF MONITOR: WI-FI", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
         if not wifi_networks:
             draw.text((10, 30), "Awaiting targets...", font=font, fill=255)
         else:
             y = 14
             for net in wifi_networks[:4]:
                 ssid, rssi = net
-                bar_w = max(2, int((rssi + 100) * 0.4))  # Normalización gráfica de señal
+                bar_w = max(2, int((rssi + 100) * 0.4))
                 draw.text((0, y), f"{ssid[:10]}", font=font, fill=255)
                 draw.rectangle((70, y+2, 70+bar_w, y+8), outline=255, fill=255)
                 draw.text((112, y), f"{rssi}", font=font, fill=255)
                 y += 12
 
     elif current_view == "LIVE_NRF24":
-        # Analizador de Espectro NRF24 (16 Columnas Gráficas Dinámicas)
         draw.text((0, 0), "NRF24 SPECTRUM BAR", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
-        
         col_w = 6
         gap = 2
         for i, val in enumerate(nrf_channels):
             x = 2 + (i * (col_w + gap))
-            bar_h = min(40, int(val * 4))  # Escalamiento vertical de ruido
+            bar_h = min(40, int(val * 4))
             y = 52 - bar_h
             draw.rectangle((x, y, x + col_w, 52), outline=255, fill=255)
-            
         draw.text((0, 54), "2.4G Hz CHANNELS (0-15)", font=font, fill=255)
 
     elif current_view == "LIVE_DATA":
-        # Captura de Volcados Estáticos (RFID, Control Remoto IR)
         draw.text((0, 0), "DATA CAPTURED", font=font, fill=255)
         draw.line(((0, 11), (WIDTH, 11)), fill=255)
         draw.text((0, 24), status_text[:21], font=font, fill=255)
@@ -127,10 +118,20 @@ def render_ui():
             draw.text((0, 38), status_text[21:42], font=font, fill=255)
         draw.text((0, 54), "[LEFT] TO RETURN", font=font, fill=255)
 
-    oled.image(image)
-    oled.show()
+    try:
+        oled.image(image)
+        oled.show()
+    except Exception:
+        pass # Mitigar colisiones menores en el bus I2C
 
-# ─── DISPAROS HTTP ASÍNCRONOS (FIRE-AND-FORGET SIN BLOQUEO DE HILO) ───
+# ─── BUCLE REFRESCADOR ASÍNCRONO DEL HARDWARE (FPS CENTRAL) ───
+async def screen_refresh_loop():
+    """Vigila y empuja el dibujo a la OLED a unos 15 FPS de forma constante y limpia"""
+    while True:
+        draw_screen()
+        await asyncio.sleep(0.06) # ~16 FPS, perfecto para refrescos sin parpadeo
+
+# ─── DISPAROS HTTP ASÍNCRONOS ───
 async def async_trigger_action(option):
     global current_view, status_text, wifi_networks, nrf_channels
     
@@ -143,43 +144,31 @@ async def async_trigger_action(option):
     else:
         current_view = "EXECUTING"
         status_text = "Sending command..."
-        
-    render_ui()
 
     async with aiohttp.ClientSession() as session:
         try:
-            if option == 0:
-                await session.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=0.2)
-            elif option == 1:
-                await session.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=0.2)
-            elif option == 2:
-                await session.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=0.2)
-            elif option == 3:
-                await session.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=0.2)
-            elif option == 4:
-                await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=0.2)
-        except Exception:
-            pass  # Los timeouts ultracortos intencionales se descartan de inmediato
+            if option == 0: await session.post(f"{API_URL}/wifi/action", json={"cmd": "INITIALIZE"}, timeout=0.2)
+            elif option == 1: await session.post(f"{API_URL}/nrf24/action", json={"cmd": "SCAN_SPECTRUM"}, timeout=0.2)
+            elif option == 2: await session.post(f"{API_URL}/rfid/action", json={"cmd": "READ"}, timeout=0.2)
+            elif option == 3: await session.post(f"{API_URL}/ir/action", json={"cmd": "CAPTURE"}, timeout=0.2)
+            elif option == 4: await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_START", "ecosystem": "APPLE", "interval_ms": 30}, timeout=0.2)
+        except Exception: pass
 
 async def async_stop_action():
     async with aiohttp.ClientSession() as session:
         try:
-            if current_idx == 0:
-                await session.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=0.5)
-            elif current_idx == 1:
-                await session.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=0.5)
-            elif current_idx == 4:
-                await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=0.5)
-        except Exception:
-            pass
+            if current_idx == 0: await session.post(f"{API_URL}/wifi/action", json={"cmd": "STOP_MONITOR"}, timeout=0.5)
+            elif current_idx == 1: await session.post(f"{API_URL}/nrf24/action", json={"cmd": "STOP_JAMMER"}, timeout=0.5)
+            elif current_idx == 4: await session.post(f"{API_URL}/ble/action", json={"cmd": "FLOOD_STOP"}, timeout=0.5)
+        except Exception: pass
 
-# ─── RECOLECTOR ASÍNCRONO BLINDADO CONTRA CONDICIONES DE CARRERA ───
+# ─── RECOLECTOR ASÍNCRONO DE LOGS Y MENSAJES (SÓLO CONFIGURA VARIABLES) ───
 async def websocket_listener():
     global current_view, wifi_networks, nrf_channels, status_text
     while True:
         try:
             async with websockets.connect(WS_URL) as ws:
-                print("[+] Pipeline WebSocket acoplado libre de lag.")
+                print("[+] Pipeline WebSocket acoplado y escuchando.")
                 while True:
                     msg = await ws.recv()
                     payload = json.loads(msg)
@@ -187,15 +176,13 @@ async def websocket_listener():
                     if not isinstance(payload, dict):
                         continue
                     
-                    # 🛠️ EXTRACCIÓN ANATÓMICA INMEDIATA (Ignora candados de sincronización de vista)
+                    # 1. Captura anatómica para espectro NRF24 o Wi-Fi Spectrum crudo
                     if "channels" in payload:
                         raw_channels = payload.get("channels")
                         if isinstance(raw_channels, list):
                             for idx in range(min(16, len(raw_channels))):
                                 nrf_channels[idx] = float(raw_channels[idx])
-                            # Solo redibuja la OLED si el usuario ya está parado en el analizador
-                            if current_view == "LIVE_NRF24":
-                                render_ui()
+                                
                     else:
                         module = str(payload.get("module", "")).upper()
                         data = payload.get("data", payload)
@@ -205,56 +192,49 @@ async def websocket_listener():
                             if isinstance(raw_channels, list):
                                 for idx in range(min(16, len(raw_channels))):
                                     nrf_channels[idx] = float(raw_channels[idx])
-                                if current_view == "LIVE_NRF24":
-                                    render_ui()
                                 
-                        elif current_view == "LIVE_WIFI" or module == "WIFI":
-                            ssid = data.get("ssid") if isinstance(data, dict) else payload.get("ssid")
-                            rssi = data.get("rssi") if isinstance(data, dict) else payload.get("rssi")
+                        # 2. Captura e inyección para el Sniffer Wi-Fi (Venga de donde venga)
+                        elif "ssid" in data or "rssi" in data or module == "WIFI":
+                            ssid = data.get("ssid") or payload.get("ssid")
+                            rssi = data.get("rssi") or payload.get("rssi")
                             if ssid and rssi:
+                                # Filtrar duplicados
                                 wifi_networks = [n for n in wifi_networks if n[0] != ssid]
                                 wifi_networks.append((ssid, int(rssi)))
                                 wifi_networks.sort(key=lambda x: x[1], reverse=True)
-                                render_ui()
                                 
+                        # 3. Capturas estáticas (RFID, IR)
                         else:
-                            uid = data.get("uid") if isinstance(data, dict) else payload.get("uid")
-                            proto = data.get("protocol") if isinstance(data, dict) else payload.get("protocol")
+                            uid = data.get("uid") or payload.get("uid")
+                            proto = data.get("protocol") or payload.get("protocol")
                             if uid and current_view == "EXECUTING":
                                 status_text = f"UID: {uid}"
                                 current_view = "LIVE_DATA"
-                                render_ui()
                             elif proto and current_view == "EXECUTING":
-                                code = data.get("code") if isinstance(data, dict) else payload.get("code")
+                                code = data.get("code") or payload.get("code")
                                 status_text = f"IR: {proto}\n0x{code}"
                                 current_view = "LIVE_DATA"
-                                render_ui()
         except Exception:
             await asyncio.sleep(1)
 
-# ─── LAZO DE CONTROL DEL D-PAD ELECTRÓNICO (ASÍNCRONO) ───
+# ─── LAZO DE ESCUCHA DEL D-PAD (SÓLO CAMBIA ESTADOS INTERNOS) ───
 async def main_hardware_loop():
     global current_idx, current_view
-    render_ui()
     
     while True:
         if current_view == "BANNER":
             if not GPIO.input(BUTTONS["OK"]):
                 current_view = "MENU"
-                render_ui()
                 await asyncio.sleep(0.3)
                 
         elif current_view == "MENU":
             if not GPIO.input(BUTTONS["DOWN"]):
                 current_idx = (current_idx + 1) % len(menu_items)
-                render_ui()
                 await asyncio.sleep(0.2)
             elif not GPIO.input(BUTTONS["UP"]):
                 current_idx = (current_idx - 1) % len(menu_items)
-                render_ui()
                 await asyncio.sleep(0.2)
             elif not GPIO.input(BUTTONS["OK"]):
-                # Disparar petición HTTP de comando sin frenar el bucle de renderizado
                 asyncio.create_task(async_trigger_action(current_idx))
                 await asyncio.sleep(0.3)
                 
@@ -262,16 +242,16 @@ async def main_hardware_loop():
             if not GPIO.input(BUTTONS["LEFT"]):
                 asyncio.create_task(async_stop_action())
                 current_view = "MENU"
-                render_ui()
                 await asyncio.sleep(0.3)
                 
-        await asyncio.sleep(0.05)  # Breve ventana de respiro para que el WebSocket dibuje
+        await asyncio.sleep(0.05)
 
 async def main():
-    # Ambas tareas se ejecutan de forma paralela en el mismo bucle asíncrono
+    # El lazo asíncrono ahora ejecuta las TRES tareas en paralelo, aislando el renderizado de la red
     await asyncio.gather(
         websocket_listener(),
-        main_hardware_loop()
+        main_hardware_loop(),
+        screen_refresh_loop()
     )
 
 if __name__ == "__main__":
